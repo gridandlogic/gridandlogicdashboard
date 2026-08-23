@@ -47,33 +47,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   );
   const profileRef = useRef<Profile | null>(null);
 
-  const subscribeToPush = useCallback(async (userId: string) => {
-    if (typeof window === "undefined" || !("serviceWorker" in navigator) || !("PushManager" in window)) return;
-    const vapidPublicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
-    if (!vapidPublicKey) return;
-    try {
-      const reg = await navigator.serviceWorker.ready;
-      const existingSub = await reg.pushManager.getSubscription();
-      if (existingSub) {
-        await fetch("/api/push/subscribe", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ user_id: userId, subscription: existingSub.toJSON() }),
-        });
-        return;
-      }
-      const sub = await reg.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: vapidPublicKey,
-      });
-      await fetch("/api/push/subscribe", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_id: userId, subscription: sub.toJSON() }),
-      });
-    } catch {}
-  }, []);
-
   const refreshMembers = useCallback(async () => {
     const { data } = await supabase
       .from("profiles")
@@ -118,9 +91,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (typeof window !== "undefined" && "serviceWorker" in navigator) {
         try {
           await navigator.serviceWorker.register("/sw.js");
-          if (window.Notification.permission === "granted") {
-            await subscribeToPush(user.id);
-          }
         } catch {}
       }
 
@@ -160,19 +130,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                 };
               }
             }
-
-            if (typeof document !== "undefined" && document.hidden) {
-              fetch("/api/push/send", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  user_id: user.id,
-                  title: n.title,
-                  body: n.body || "",
-                  link: n.link || "/dashboard",
-                }),
-              }).catch(() => {});
-            }
           }
         )
         .on(
@@ -204,10 +161,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (typeof window === "undefined" || !("Notification" in window)) return;
     const perm = await window.Notification.requestPermission();
     setNotifPermission(perm);
-    if (perm === "granted" && profileRef.current) {
-      await subscribeToPush(profileRef.current.id);
-    }
-  }, [subscribeToPush]);
+  }, []);
 
   const markAllRead = useCallback(async () => {
     if (!profileRef.current) return;
