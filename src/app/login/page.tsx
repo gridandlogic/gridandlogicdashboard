@@ -1,12 +1,23 @@
 "use client";
-import React from "react";
+import React, { Suspense } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
 import { IconBrandGoogle } from "@tabler/icons-react";
 
 export default function LoginPage() {
+  return (
+    <Suspense>
+      <LoginContent />
+    </Suspense>
+  );
+}
+
+function LoginContent() {
   const supabase = createClient();
+  const searchParams = useSearchParams();
+  const errorParam = searchParams.get("error");
 
   const handleGoogle = async () => {
     await supabase.auth.signInWithOAuth({
@@ -27,6 +38,17 @@ export default function LoginPage() {
         <p className="mt-2 max-w-sm text-sm text-neutral-600 dark:text-neutral-300">
           Sign in with your Google account to access your boards, channels, messages and meetings.
         </p>
+
+        {errorParam && (
+          <div className="mt-4 rounded-md border border-red-500/30 bg-red-500/10 p-3">
+            <p className="text-sm text-red-500">
+              <strong>Sign-in error:</strong> {decodeURIComponent(errorParam)}
+            </p>
+            <p className="mt-1 text-xs text-red-400/70">
+              Check that Google OAuth is enabled in Supabase and your Google Cloud Console redirect URI matches exactly.
+            </p>
+          </div>
+        )}
 
         <div className="my-8 flex flex-col space-y-6">
           <button
