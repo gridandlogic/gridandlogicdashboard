@@ -14,6 +14,8 @@ import {
   IconPhoneOff,
   IconUserPlus,
   IconX,
+  IconDotsVertical,
+  IconUsers,
 } from "@tabler/icons-react";
 
 const ICE_SERVERS: RTCConfiguration = {
@@ -43,6 +45,7 @@ export default function MeetingRoomPage() {
   const [showInvite, setShowInvite] = useState(false);
   const [joined, setJoined] = useState(false);
   const [mediaError, setMediaError] = useState<string | null>(null);
+  const [elapsed, setElapsed] = useState(0);
 
   const localStreamRef = useRef<MediaStream | null>(null);
   const screenStreamRef = useRef<MediaStream | null>(null);
@@ -53,6 +56,20 @@ export default function MeetingRoomPage() {
   const myId = profile.id;
 
   const updatePeers = () => setPeers({ ...peersRef.current });
+
+  useEffect(() => {
+    if (!joined) return;
+    const interval = setInterval(() => setElapsed((e) => e + 1), 1000);
+    return () => clearInterval(interval);
+  }, [joined]);
+
+  const formatElapsed = (s: number) => {
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const sec = s % 60;
+    if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
+    return `${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
+  };
 
   const createPeer = useCallback(
     (remoteId: string, remoteName: string, initiator: boolean) => {
@@ -332,11 +349,15 @@ export default function MeetingRoomPage() {
 
   if (meeting?.status === "ended") {
     return (
-      <div className="flex flex-1 flex-col items-center justify-center gap-3 text-neutral-500">
-        <p className="text-lg font-semibold">This meeting has ended.</p>
+      <div className="flex flex-1 flex-col items-center justify-center gap-4 bg-neutral-950 text-neutral-400">
+        <div className="flex h-20 w-20 items-center justify-center rounded-full bg-red-500/10">
+          <IconPhoneOff className="h-10 w-10 text-red-500" />
+        </div>
+        <p className="text-lg font-semibold text-white">This meeting has ended</p>
+        <p className="text-sm text-neutral-500">The meeting was ended by the host.</p>
         <button
           onClick={() => router.push("/dashboard/meetings")}
-          className="rounded-md bg-cyan-600 px-4 py-2 text-sm text-white"
+          className="mt-2 rounded-lg bg-cyan-600 px-6 py-2.5 text-sm font-medium text-white hover:bg-cyan-500"
         >
           Back to meetings
         </button>
@@ -345,73 +366,109 @@ export default function MeetingRoomPage() {
   }
 
   const peerList = Object.entries(peers);
+  const totalParticipants = peerList.length + 1;
   const gridCols =
-    peerList.length === 0
+    totalParticipants <= 1
       ? "grid-cols-1"
-      : peerList.length <= 1
+      : totalParticipants <= 2
       ? "grid-cols-1 md:grid-cols-2"
-      : peerList.length <= 3
+      : totalParticipants <= 4
       ? "grid-cols-2"
-      : "grid-cols-2 md:grid-cols-3";
+      : totalParticipants <= 6
+      ? "grid-cols-2 md:grid-cols-3"
+      : "grid-cols-3 md:grid-cols-4";
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden bg-neutral-950">
-      <div className="flex items-center justify-between border-b border-neutral-800 p-3">
-        <h1 className="truncate font-semibold text-white">
-          {meeting?.title ?? "Meeting"}{" "}
-          <span className="ml-2 rounded bg-red-500/20 px-2 py-0.5 text-xs text-red-400">
-            {joined ? "LIVE" : "Connecting…"}
-          </span>
-        </h1>
-        <button
-          onClick={() => setShowInvite(true)}
-          className="flex items-center gap-2 rounded-md bg-neutral-800 px-3 py-1.5 text-sm text-white hover:bg-neutral-700"
-        >
-          <IconUserPlus className="h-4 w-4" /> Invite
-        </button>
+      {/* Top bar — Google Meet style */}
+      <div className="flex items-center justify-between px-4 py-3">
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            <span className={`h-2.5 w-2.5 rounded-full ${joined ? "bg-red-500 animate-pulse" : "bg-amber-500"}`} />
+            <span className="text-sm font-medium text-white">
+              {joined ? formatElapsed(elapsed) : "Connecting…"}
+            </span>
+          </div>
+          <span className="text-neutral-600">|</span>
+          <h1 className="truncate text-sm text-neutral-300">
+            {meeting?.title ?? "Meeting"}
+          </h1>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowInvite(true)}
+            className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-neutral-300 hover:bg-neutral-800"
+          >
+            <IconUserPlus className="h-4 w-4" />
+            <span className="hidden sm:inline">Invite</span>
+          </button>
+          <div className="flex items-center gap-1.5 rounded-lg bg-neutral-800/60 px-3 py-2 text-sm text-neutral-300">
+            <IconUsers className="h-4 w-4" />
+            {totalParticipants}
+          </div>
+        </div>
       </div>
 
       {mediaError && (
-        <p className="bg-amber-500/10 p-2 text-center text-xs text-amber-500">
+        <div className="mx-4 mb-2 rounded-lg bg-amber-500/10 px-4 py-2 text-center text-xs text-amber-400">
           {mediaError}
-        </p>
+        </div>
       )}
 
-      <div className={`grid flex-1 gap-2 overflow-y-auto p-2 ${gridCols}`}>
-        <div className="relative min-h-40 overflow-hidden rounded-xl bg-neutral-900">
-          <video
-            ref={localVideoRef}
-            autoPlay
-            muted
-            playsInline
-            className="h-full w-full object-cover"
-          />
-          <span className="absolute bottom-2 left-2 rounded bg-black/60 px-2 py-0.5 text-xs text-white">
-            You {sharing && "(sharing screen)"}
-          </span>
+      {/* Video grid — Google Meet style tiles */}
+      <div className={`grid flex-1 gap-3 overflow-y-auto p-3 md:p-4 ${gridCols}`}>
+        {/* Local video tile */}
+        <div className="relative min-h-48 overflow-hidden rounded-2xl bg-neutral-800 md:min-h-56">
+          {camOn ? (
+            <video
+              ref={localVideoRef}
+              autoPlay
+              muted
+              playsInline
+              className="h-full w-full object-cover"
+            />
+          ) : (
+            <div className="flex h-full w-full items-center justify-center">
+              <div className="flex h-16 w-16 items-center justify-center rounded-full bg-cyan-600 text-xl font-bold text-white md:h-20 md:w-20">
+                {profile.first_name?.[0]}
+                {profile.last_name?.[0]}
+              </div>
+            </div>
+          )}
+          <div className="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-black/70 to-transparent" />
+          <div className="absolute bottom-2 left-3 flex items-center gap-2">
+            {!micOn && (
+              <IconMicrophoneOff className="h-3.5 w-3.5 text-red-400" />
+            )}
+            <span className="text-xs font-medium text-white">
+              You {sharing && "· sharing"}
+            </span>
+          </div>
         </div>
+
+        {/* Remote video tiles */}
         {peerList.map(([id, peer]) => (
           <RemoteVideo key={id} peer={peer} />
         ))}
       </div>
 
-      {/* Controls */}
-      <div className="flex items-center justify-center gap-3 border-t border-neutral-800 p-4">
-        <ControlButton
+      {/* Bottom control bar — Google Meet style */}
+      <div className="flex items-center justify-center gap-2 px-4 py-4 md:gap-3">
+        <MeetControlButton
           on={micOn}
           onClick={toggleMic}
           onIcon={<IconMicrophone className="h-5 w-5" />}
           offIcon={<IconMicrophoneOff className="h-5 w-5" />}
           label={micOn ? "Mute" : "Unmute"}
         />
-        <ControlButton
+        <MeetControlButton
           on={camOn}
           onClick={toggleCam}
           onIcon={<IconVideo className="h-5 w-5" />}
           offIcon={<IconVideoOff className="h-5 w-5" />}
           label={camOn ? "Camera off" : "Camera on"}
         />
-        <ControlButton
+        <MeetControlButton
           on={!sharing}
           onClick={toggleScreenShare}
           onIcon={<IconScreenShare className="h-5 w-5" />}
@@ -419,12 +476,19 @@ export default function MeetingRoomPage() {
           label={sharing ? "Stop sharing" : "Share screen"}
         />
         <button
+          className="flex h-12 w-12 items-center justify-center rounded-full bg-neutral-800 text-neutral-300 hover:bg-neutral-700 md:hidden"
+          title="More"
+        >
+          <IconDotsVertical className="h-5 w-5" />
+        </button>
+        <div className="mx-1 h-8 w-px bg-neutral-700 md:mx-2" />
+        <button
           onClick={() => leaveMeeting(meeting?.created_by === myId)}
-          className="flex items-center gap-2 rounded-full bg-red-600 px-5 py-3 text-white hover:bg-red-500"
-          title={meeting?.created_by === myId ? "End meeting for all" : "Leave"}
+          className="flex items-center gap-2 rounded-full bg-red-600 px-5 py-3 text-white transition hover:bg-red-500"
+          title={meeting?.created_by === myId ? "End meeting for all" : "Leave meeting"}
         >
           <IconPhoneOff className="h-5 w-5" />
-          <span className="hidden text-sm sm:inline">
+          <span className="hidden text-sm font-medium sm:inline">
             {meeting?.created_by === myId ? "End" : "Leave"}
           </span>
         </button>
@@ -432,11 +496,11 @@ export default function MeetingRoomPage() {
 
       {showInvite && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
           onClick={() => setShowInvite(false)}
         >
           <div
-            className="w-full max-w-sm rounded-xl bg-neutral-900 p-4"
+            className="w-full max-w-sm rounded-2xl border border-neutral-700 bg-neutral-900 p-5"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between">
@@ -448,9 +512,8 @@ export default function MeetingRoomPage() {
                 <IconX className="h-5 w-5" />
               </button>
             </div>
-            <p className="mt-1 text-xs text-neutral-500">
-              Only invited people get notified and can join. Everyone else just
-              sees that this meeting is being held.
+            <p className="mt-2 text-xs text-neutral-500">
+              Invite teammates to this meeting. They&apos;ll get a notification.
             </p>
             <div className="mt-4 flex max-h-64 flex-col gap-1 overflow-y-auto">
               {members
@@ -459,14 +522,16 @@ export default function MeetingRoomPage() {
                   <button
                     key={m.id}
                     onClick={() => invite(m.id)}
-                    className="flex items-center gap-3 rounded-md px-3 py-2 text-left text-sm text-neutral-200 hover:bg-neutral-800"
+                    className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm text-neutral-200 hover:bg-neutral-800"
                   >
-                    <span className="flex h-7 w-7 items-center justify-center rounded-full bg-cyan-600 text-[10px] font-bold text-white">
+                    <span className="flex h-8 w-8 items-center justify-center rounded-full bg-cyan-600 text-[10px] font-bold text-white">
                       {m.first_name?.[0]}
                       {m.last_name?.[0]}
                     </span>
-                    {m.first_name} {m.last_name}
-                    <span className="ml-auto text-xs text-cyan-500">Invite</span>
+                    <span className="flex-1">
+                      {m.first_name} {m.last_name}
+                    </span>
+                    <span className="text-xs font-medium text-cyan-500">Invite</span>
                   </button>
                 ))}
             </div>
@@ -479,20 +544,46 @@ export default function MeetingRoomPage() {
 
 function RemoteVideo({ peer }: { peer: PeerInfo }) {
   const ref = useRef<HTMLVideoElement>(null);
+  const [hasVideo, setHasVideo] = useState(true);
+
   useEffect(() => {
     if (ref.current) ref.current.srcObject = peer.stream;
+    const checkVideo = () => {
+      const tracks = peer.stream.getVideoTracks();
+      setHasVideo(tracks.length > 0 && tracks[0].enabled && tracks[0].readyState === "live");
+    };
+    checkVideo();
+    const interval = setInterval(checkVideo, 1000);
+    return () => clearInterval(interval);
   }, [peer.stream]);
+
+  const initials = peer.name
+    .split(" ")
+    .map((n) => n[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+
   return (
-    <div className="relative min-h-40 overflow-hidden rounded-xl bg-neutral-900">
-      <video ref={ref} autoPlay playsInline className="h-full w-full object-cover" />
-      <span className="absolute bottom-2 left-2 rounded bg-black/60 px-2 py-0.5 text-xs text-white">
+    <div className="relative min-h-48 overflow-hidden rounded-2xl bg-neutral-800 md:min-h-56">
+      {hasVideo ? (
+        <video ref={ref} autoPlay playsInline className="h-full w-full object-cover" />
+      ) : (
+        <div className="flex h-full w-full items-center justify-center">
+          <div className="flex h-16 w-16 items-center justify-center rounded-full bg-neutral-600 text-xl font-bold text-white md:h-20 md:w-20">
+            {initials}
+          </div>
+        </div>
+      )}
+      <div className="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-black/70 to-transparent" />
+      <span className="absolute bottom-2 left-3 text-xs font-medium text-white">
         {peer.name}
       </span>
     </div>
   );
 }
 
-function ControlButton({
+function MeetControlButton({
   on,
   onClick,
   onIcon,
@@ -509,7 +600,7 @@ function ControlButton({
     <button
       onClick={onClick}
       title={label}
-      className={`rounded-full p-3 transition ${
+      className={`flex h-12 w-12 items-center justify-center rounded-full transition md:h-14 md:w-14 ${
         on
           ? "bg-neutral-800 text-white hover:bg-neutral-700"
           : "bg-red-500/20 text-red-400 hover:bg-red-500/30"

@@ -89,21 +89,22 @@ export default function MeetingsPage() {
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder="Meeting title (optional)"
-            className="rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-900 outline-none focus:border-cyan-500 dark:border-neutral-700 dark:bg-neutral-800 dark:text-white"
+            className="rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-900 outline-none focus:border-cyan-500 dark:border-neutral-700 dark:bg-neutral-800 dark:text-white"
           />
           <button
             onClick={createMeeting}
             disabled={creating}
-            className="flex items-center gap-2 rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-500 disabled:opacity-50"
+            className="flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-red-500 disabled:opacity-50"
           >
             <IconVideoPlus className="h-4 w-4" /> Start Meeting
           </button>
         </div>
       </div>
 
+      {/* Live meetings */}
       <div>
         <h2 className="mb-3 flex items-center gap-2 font-semibold text-neutral-700 dark:text-neutral-200">
-          <span className="h-2 w-2 animate-pulse rounded-full bg-red-500" /> Live now
+          <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-red-500" /> Live now
         </h2>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {live.map((m) => {
@@ -113,42 +114,49 @@ export default function MeetingsPage() {
             return (
               <div
                 key={m.id}
-                className="rounded-xl border border-red-500/30 bg-red-500/5 p-5"
+                className="rounded-2xl border border-red-500/30 bg-red-500/5 p-5 transition hover:border-red-500/50"
               >
-                <h3 className="font-semibold text-neutral-800 dark:text-white">
+                <div className="flex items-center gap-2">
+                  <span className="h-2 w-2 animate-pulse rounded-full bg-red-500" />
+                  <span className="text-[10px] font-bold uppercase tracking-wide text-red-400">Live</span>
+                </div>
+                <h3 className="mt-2 font-semibold text-neutral-800 dark:text-white">
                   {m.title}
                 </h3>
                 <p className="mt-1 text-xs text-neutral-500">
-                  Started by {memberName(m.created_by)} ·{" "}
-                  {formatDate(m.started_at)} {formatTime(m.started_at)}
+                  Started by {memberName(m.created_by)} · {formatTime(m.started_at)}
                 </p>
-                <div className="mt-2 flex items-center gap-1 text-xs text-neutral-500">
+                <div className="mt-3 flex items-center gap-1.5 text-xs text-neutral-500">
                   <IconUsers className="h-3.5 w-3.5" />
                   {parts.length > 0
-                    ? parts.map((p) => memberName(p.user_id)).join(", ")
+                    ? `${parts.length} participant${parts.length > 1 ? "s" : ""}`
                     : "No participants yet"}
                 </div>
                 {canJoin ? (
                   <button
                     onClick={() => router.push(`/dashboard/meetings/${m.id}`)}
-                    className="mt-4 w-full rounded-md bg-red-600 py-2 text-sm font-medium text-white hover:bg-red-500"
+                    className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg bg-red-600 py-2.5 text-sm font-medium text-white transition hover:bg-red-500"
                   >
-                    Join Meeting
+                    <IconVideo className="h-4 w-4" /> Join Meeting
                   </button>
                 ) : (
-                  <p className="mt-4 rounded-md bg-neutral-200 py-2 text-center text-xs text-neutral-600 dark:bg-neutral-800 dark:text-neutral-400">
-                    In progress — you were not invited to this one
+                  <p className="mt-4 rounded-lg bg-neutral-200 py-2.5 text-center text-xs text-neutral-600 dark:bg-neutral-800 dark:text-neutral-400">
+                    In progress — not invited
                   </p>
                 )}
               </div>
             );
           })}
           {live.length === 0 && (
-            <p className="text-sm text-neutral-500">No live meetings right now.</p>
+            <div className="flex flex-col items-center gap-3 rounded-2xl border border-dashed border-neutral-300 py-12 text-neutral-400 dark:border-neutral-700">
+              <IconVideo className="h-8 w-8" />
+              <p className="text-sm">No live meetings right now.</p>
+            </div>
           )}
         </div>
       </div>
 
+      {/* Past meetings */}
       <div>
         <h2 className="mb-3 flex items-center gap-2 font-semibold text-neutral-700 dark:text-neutral-200">
           <IconHistory className="h-4 w-4" /> Meeting records
@@ -159,8 +167,11 @@ export default function MeetingsPage() {
             return (
               <div
                 key={m.id}
-                className="flex flex-wrap items-center gap-3 rounded-lg border border-neutral-200 bg-gray-50 p-4 dark:border-neutral-700 dark:bg-neutral-800"
+                className="flex flex-wrap items-center gap-3 rounded-xl border border-neutral-200 bg-gray-50 p-4 transition hover:border-neutral-300 dark:border-neutral-700 dark:bg-neutral-800 dark:hover:border-neutral-600"
               >
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-neutral-200 dark:bg-neutral-700">
+                  <IconHistory className="h-5 w-5 text-neutral-500" />
+                </div>
                 <div className="flex-1">
                   <p className="font-medium text-neutral-800 dark:text-white">
                     {m.title}
@@ -171,10 +182,10 @@ export default function MeetingsPage() {
                     {m.ended_at && ` — ${formatTime(m.ended_at)}`}
                   </p>
                 </div>
-                <div className="flex items-center gap-1 text-xs text-neutral-500">
+                <div className="flex items-center gap-1.5 text-xs text-neutral-500">
                   <IconUsers className="h-3.5 w-3.5" />
                   {parts.length > 0
-                    ? parts.map((p) => memberName(p.user_id)).join(", ")
+                    ? `${parts.length} participant${parts.length > 1 ? "s" : ""}`
                     : "—"}
                 </div>
               </div>
