@@ -52,6 +52,7 @@ export default function MeetingRoomPage() {
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const peersRef = useRef<Record<string, PeerInfo>>({});
   const signalChannelRef = useRef<RealtimeChannel | null>(null);
+  const pendingIceRef = useRef<Record<string, RTCIceCandidate[]>>({});
 
   const myId = profile.id;
 
@@ -78,18 +79,49 @@ export default function MeetingRoomPage() {
       const pc = new RTCPeerConnection(ICE_SERVERS);
       const remoteStream = new MediaStream();
       peersRef.current[remoteId] = { pc, stream: remoteStream, name: remoteName };
+      pendingIceRef.current[remoteId] = [];
       updatePeers();
 
+      // Set negotiation handler BEFORE adding tracks — on fast PCs the event
+      // can fire before the handler is set if we add tracks first.
+      if (initiator) {
+        pc.onnegotiationneeded = async () => {
+          try {
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+            signalChannelRef.current?.send({
+              type: "broadcast",
+              event: "signal",
+              payload: {
+                from: myId,
+                fromName: `${profile.first_name} ${profile.last_name}`,
+                to: remoteId,
+                kind: "offer",
+                data: pc.localDescription,
+              },
+            });
+          } catch (e) {
+            console.error("Negotiation error:", e);
+          }
+        };
+      }
+
+      // Add local tracks AFTER negotiation handler is set
       localStreamRef.current?.getTracks().forEach((track) => {
         pc.addTrack(track, localStreamRef.current!);
       });
 
+      // Use e.track directly — e.streams[0] is undefined on some PC browsers
       pc.ontrack = (e) => {
-        e.streams[0]?.getTracks().forEach((t) => {
-          if (!remoteStream.getTracks().some((rt) => rt.id === t.id)) {
-            remoteStream.addTrack(t);
+        if (e.track) {
+          if (!remoteStream.getTracks().some((rt) => rt.id === e.track.id)) {
+            remoteStream.addTrack(e.track);
           }
-        });
+          e.track.onended = () => {
+            remoteStream.removeTrack(e.track);
+            updatePeers();
+          };
+        }
         updatePeers();
       };
 
@@ -108,32 +140,24 @@ export default function MeetingRoomPage() {
         }
       };
 
+      // Only remove on failed/closed — "disconnected" is temporary and
+      // removing the peer kicks the 3rd person on minor network blips.
       pc.onconnectionstatechange = () => {
-        if (["failed", "closed", "disconnected"].includes(pc.connectionState)) {
+        if (pc.connectionState === "failed") {
+          pc.restartIce();
+        }
+        if (pc.connectionState === "closed") {
           delete peersRef.current[remoteId];
+          delete pendingIceRef.current[remoteId];
           updatePeers();
         }
       };
 
-      if (initiator) {
-        pc.onnegotiationneeded = async () => {
-          try {
-            const offer = await pc.createOffer();
-            await pc.setLocalDescription(offer);
-            signalChannelRef.current?.send({
-              type: "broadcast",
-              event: "signal",
-              payload: {
-                from: myId,
-                fromName: `${profile.first_name} ${profile.last_name}`,
-                to: remoteId,
-                kind: "offer",
-                data: pc.localDescription,
-              },
-            });
-          } catch {}
-        };
-      }
+      pc.oniceconnectionstatechange = () => {
+        if (pc.iceConnectionState === "failed") {
+          pc.restartIce();
+        }
+      };
 
       return pc;
     },
@@ -210,6 +234,12 @@ export default function MeetingRoomPage() {
           if (kind === "offer") {
             const pc = createPeer(from, fromName ?? "Peer", false);
             await pc.setRemoteDescription(new RTCSessionDescription(data));
+            // Flush any ICE candidates that arrived before the offer
+            const buffered = pendingIceRef.current[from] || [];
+            for (const candidate of buffered) {
+              try { await pc.addIceCandidate(candidate); } catch {}
+            }
+            pendingIceRef.current[from] = [];
             const answer = await pc.createAnswer();
             await pc.setLocalDescription(answer);
             channel.send({
@@ -227,13 +257,25 @@ export default function MeetingRoomPage() {
             const p = peersRef.current[from];
             if (p && !p.pc.currentRemoteDescription) {
               await p.pc.setRemoteDescription(new RTCSessionDescription(data));
+              // Flush buffered ICE candidates
+              const buffered = pendingIceRef.current[from] || [];
+              for (const candidate of buffered) {
+                try { await p.pc.addIceCandidate(candidate); } catch {}
+              }
+              pendingIceRef.current[from] = [];
             }
           } else if (kind === "ice") {
             const p = peersRef.current[from];
-            if (p) {
+            if (p && p.pc.currentRemoteDescription) {
               try {
                 await p.pc.addIceCandidate(new RTCIceCandidate(data));
               } catch {}
+            } else {
+              // Buffer the candidate — peer may not exist yet or remote
+              // description may not be set. This fixes the 3rd-person issue
+              // where ICE candidates arrive before the offer/answer.
+              if (!pendingIceRef.current[from]) pendingIceRef.current[from] = [];
+              pendingIceRef.current[from].push(new RTCIceCandidate(data));
             }
           }
         })

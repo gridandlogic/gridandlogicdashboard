@@ -60,7 +60,7 @@ export default function PendingPage() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-neutral-950 px-4">
       <div className="w-full max-w-md rounded-2xl border border-neutral-800 bg-black p-8 text-center">
-        <img src="/logo.svg" alt="Grid & Logic" className="mx-auto h-14 w-14" />
+        <img src="/logo.svg" alt="Grid & Logic" className="mx-auto h-14 w-14 rounded-full" />
         {status === "removed" ? (
           <>
             <h1 className="mt-6 text-xl font-bold text-red-400">Access removed</h1>
