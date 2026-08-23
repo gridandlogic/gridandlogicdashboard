@@ -449,8 +449,8 @@ export default function MeetingRoomPage() {
               </button>
             </div>
             <p className="mt-1 text-xs text-neutral-500">
-              Send a notification to invite someone to this meeting. Anyone in
-              the team can also join directly from the meetings list.
+              Only invited people get notified and can join. Everyone else just
+              sees that this meeting is being held.
             </p>
             <div className="mt-4 flex max-h-64 flex-col gap-1 overflow-y-auto">
               {members

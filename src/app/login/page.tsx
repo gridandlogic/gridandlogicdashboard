@@ -30,7 +30,7 @@ function LoginContent() {
     <div className="flex min-h-screen items-center justify-center bg-neutral-950 px-4 py-10">
       <div className="shadow-input mx-auto w-full max-w-md rounded-2xl bg-white p-4 md:p-8 dark:bg-black">
         <div className="flex items-center gap-3">
-          <img src="/logo.svg" alt="Grid & Logic" className="h-10 w-10 rounded-full" />
+          <img src="/logo.svg" alt="Grid & Logic" className="h-10 w-10" />
           <h2 className="text-xl font-bold text-neutral-800 dark:text-neutral-200">
             Welcome back to Grid &amp; Logic
           </h2>

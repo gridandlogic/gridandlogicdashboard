@@ -6,7 +6,7 @@ export const dynamic = "force-dynamic";
 export const metadata: Metadata = {
   title: "Grid & Logic",
   description: "Grid & Logic team dashboard — boards, channels, messages and meetings",
-  icons: { icon: "/logo.svg", apple: "/logo.svg" },
+  icons: { icon: "/logo.svg" },
 };
 
 export default function RootLayout({
