@@ -154,7 +154,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   if (!profile) {
     return (
       <div className="flex h-screen items-center justify-center bg-neutral-950">
-        <img src="/logo.svg" alt="Grid & Logic" className="h-14 w-14 animate-pulse" />
+        <img src="/logo.svg" alt="Grid & Logic" className="h-14 w-14 animate-pulse rounded-full" />
       </div>
     );
   }

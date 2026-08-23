@@ -28,7 +28,7 @@ export default function Home() {
   return (
     <div className="flex h-screen items-center justify-center bg-neutral-950">
       <div className="flex flex-col items-center gap-4">
-        <img src="/logo.svg" alt="Grid & Logic" className="h-16 w-16 animate-pulse" />
+        <img src="/logo.svg" alt="Grid & Logic" className="h-16 w-16 animate-pulse rounded-full" />
         <p className="text-sm text-neutral-400">Loading Grid &amp; Logic…</p>
       </div>
     </div>

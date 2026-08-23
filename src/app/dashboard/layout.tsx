@@ -164,7 +164,7 @@ export const Logo = () => {
       href="/dashboard"
       className="relative z-20 flex items-center space-x-2 py-1 text-sm font-normal text-black"
     >
-      <img src="/logo.svg" alt="Grid & Logic" className="h-6 w-6 shrink-0" />
+      <img src="/logo.svg" alt="Grid & Logic" className="h-6 w-6 shrink-0 rounded-full" />
       <motion.span
         animate={{ opacity: 1 }}
         className="font-medium whitespace-pre text-black dark:text-white"
@@ -181,7 +181,7 @@ export const LogoIcon = () => {
       href="/dashboard"
       className="relative z-20 flex items-center space-x-2 py-1 text-sm font-normal text-black"
     >
-      <img src="/logo.svg" alt="Grid & Logic" className="h-6 w-6 shrink-0" />
+      <img src="/logo.svg" alt="Grid & Logic" className="h-6 w-6 shrink-0 rounded-full" />
     </a>
   );
 };
