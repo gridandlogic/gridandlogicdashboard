@@ -11,6 +11,8 @@ import {
   IconBell,
   IconShieldCog,
   IconArrowLeft,
+  IconBellRinging,
+  IconX,
 } from "@tabler/icons-react";
 import { motion } from "motion/react";
 import { cn } from "@/lib/utils";
@@ -29,7 +31,7 @@ export default function DashboardLayout({
 }
 
 function Shell({ children }: { children: React.ReactNode }) {
-  const { profile, isAdmin, unreadCount, supabase } = useApp();
+  const { profile, isAdmin, unreadCount, supabase, notifPermission, requestNotifPermission } = useApp();
   const router = useRouter();
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
@@ -131,6 +133,20 @@ function Shell({ children }: { children: React.ReactNode }) {
       </Sidebar>
       <div className="flex flex-1 overflow-hidden">
         <div className="flex h-full w-full flex-1 flex-col overflow-hidden rounded-tl-2xl border border-neutral-200 bg-white md:rounded-tl-2xl dark:border-neutral-700 dark:bg-neutral-900">
+          {notifPermission === "default" && (
+            <div className="flex items-center gap-3 border-b border-cyan-500/30 bg-cyan-500/10 px-4 py-2.5">
+              <IconBellRinging className="h-5 w-5 shrink-0 text-cyan-500" />
+              <p className="flex-1 text-sm text-cyan-700 dark:text-cyan-300">
+                Enable push notifications to get alerted about new messages, task assignments, and meetings.
+              </p>
+              <button
+                onClick={requestNotifPermission}
+                className="rounded-md bg-cyan-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-cyan-700"
+              >
+                Enable
+              </button>
+            </div>
+          )}
           {children}
         </div>
       </div>
