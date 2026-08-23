@@ -108,8 +108,6 @@ export default function MeetingsPage() {
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {live.map((m) => {
             const parts = participantsOf(m.id);
-            const invited = parts.some((p) => p.user_id === profile.id);
-            const canJoin = m.created_by === profile.id || invited;
             return (
               <div
                 key={m.id}
@@ -128,18 +126,12 @@ export default function MeetingsPage() {
                     ? parts.map((p) => memberName(p.user_id)).join(", ")
                     : "No participants yet"}
                 </div>
-                {canJoin ? (
-                  <button
-                    onClick={() => router.push(`/dashboard/meetings/${m.id}`)}
-                    className="mt-4 w-full rounded-md bg-red-600 py-2 text-sm font-medium text-white hover:bg-red-500"
-                  >
-                    Join Meeting
-                  </button>
-                ) : (
-                  <p className="mt-4 rounded-md bg-neutral-200 py-2 text-center text-xs text-neutral-600 dark:bg-neutral-800 dark:text-neutral-400">
-                    In progress — you were not invited to this one
-                  </p>
-                )}
+                <button
+                  onClick={() => router.push(`/dashboard/meetings/${m.id}`)}
+                  className="mt-4 w-full rounded-md bg-red-600 py-2 text-sm font-medium text-white hover:bg-red-500"
+                >
+                  Join Meeting
+                </button>
               </div>
             );
           })}
