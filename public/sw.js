@@ -10,21 +10,24 @@ self.addEventListener("push", (event) => {
       data.body = event.data.text();
     }
   }
-  event.waitUntil(
-    self.registration.showNotification(data.title, {
-      body: data.body,
-      icon: "/logo.svg",
-      badge: "/logo.svg",
-      data: data.link ? { link: data.link } : {},
-    })
-  );
+  const options = {
+    body: data.body || "",
+    icon: "/logo.svg",
+    badge: "/logo.svg",
+    data: { link: data.link || "/" },
+    vibrate: [200, 100, 200],
+    requireInteraction: false,
+    tag: data.tag || "grid-logic-notification",
+    renotify: true,
+  };
+  event.waitUntil(self.registration.showNotification(data.title, options));
 });
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
   const link = event.notification.data && event.notification.data.link;
   event.waitUntil(
-    self.clients.matchAll({ type: "window" }).then((clients) => {
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {
       for (const client of clients) {
         if (client.url.includes(self.location.origin) && "focus" in client) {
           if (link) client.navigate(link);

@@ -108,6 +108,17 @@ create table if not exists public.notifications (
   created_at timestamptz not null default now()
 );
 
+-- ---------- PUSH SUBSCRIPTIONS ----------
+create table if not exists public.push_subscriptions (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.profiles(id) on delete cascade,
+  endpoint text not null,
+  p256dh text not null,
+  auth text not null,
+  created_at timestamptz not null default now(),
+  unique (user_id, endpoint)
+);
+
 -- =============================================================
 -- TRIGGERS
 -- =============================================================
@@ -327,6 +338,7 @@ alter table public.messages enable row level security;
 alter table public.meetings enable row level security;
 alter table public.meeting_participants enable row level security;
 alter table public.notifications enable row level security;
+alter table public.push_subscriptions enable row level security;
 
 -- profiles
 create policy "profiles readable by authenticated" on public.profiles
@@ -413,6 +425,11 @@ create policy "participants update" on public.meeting_participants for update to
 create policy "notifications select" on public.notifications for select to authenticated using (user_id = auth.uid());
 create policy "notifications insert" on public.notifications for insert to authenticated with check (public.is_approved());
 create policy "notifications update" on public.notifications for update to authenticated using (user_id = auth.uid());
+
+-- push_subscriptions: user manages own subscriptions
+create policy "push_subs select" on public.push_subscriptions for select to authenticated using (user_id = auth.uid());
+create policy "push_subs insert" on public.push_subscriptions for insert to authenticated with check (user_id = auth.uid());
+create policy "push_subs delete" on public.push_subscriptions for delete to authenticated using (user_id = auth.uid());
 
 -- =============================================================
 -- REALTIME
