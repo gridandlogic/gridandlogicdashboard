@@ -20,8 +20,6 @@ type AppContextType = {
   members: Profile[];
   notifications: Notification[];
   unreadCount: number;
-  notifPermission: NotificationPermission | "unsupported";
-  requestNotifPermission: () => Promise<void>;
   markAllRead: () => Promise<void>;
   refreshMembers: () => Promise<void>;
 };
@@ -40,11 +38,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [members, setMembers] = useState<Profile[]>([]);
   const [notifications, setNotifications] = useState<Notification[]>([]);
-  const [notifPermission, setNotifPermission] = useState<NotificationPermission | "unsupported">(
-    typeof window !== "undefined" && "Notification" in window
-      ? window.Notification.permission
-      : "unsupported"
-  );
   const profileRef = useRef<Profile | null>(null);
 
   const refreshMembers = useCallback(async () => {
@@ -88,10 +81,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         .limit(50);
       if (notifs) setNotifications(notifs as Notification[]);
 
-      if (typeof window !== "undefined" && "serviceWorker" in navigator) {
-        try {
-          await navigator.serviceWorker.register("/sw.js");
-        } catch {}
+      if (typeof window !== "undefined" && "Notification" in window) {
+        if (window.Notification.permission === "default") {
+          window.Notification.requestPermission();
+        }
       }
 
       notifChannel = supabase
@@ -112,23 +105,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
               "Notification" in window &&
               window.Notification.permission === "granted"
             ) {
-              const notifOptions = {
+              const browserNotif = new window.Notification(n.title, {
                 body: n.body ?? undefined,
                 icon: "/logo.svg",
-                badge: "/logo.svg",
-                data: n.link ? { link: n.link } : undefined,
+              });
+              browserNotif.onclick = () => {
+                window.focus();
+                if (n.link) router.push(n.link);
               };
-              if ("serviceWorker" in navigator) {
-                navigator.serviceWorker.ready.then((reg) =>
-                  reg.showNotification(n.title, notifOptions)
-                );
-              } else {
-                const browserNotif = new window.Notification(n.title, notifOptions);
-                browserNotif.onclick = () => {
-                  window.focus();
-                  if (n.link) router.push(n.link);
-                };
-              }
             }
           }
         )
@@ -155,12 +139,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (notifChannel) supabase.removeChannel(notifChannel);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const requestNotifPermission = useCallback(async () => {
-    if (typeof window === "undefined" || !("Notification" in window)) return;
-    const perm = await window.Notification.requestPermission();
-    setNotifPermission(perm);
   }, []);
 
   const markAllRead = useCallback(async () => {
@@ -190,8 +168,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         members,
         notifications,
         unreadCount: notifications.filter((n) => !n.read).length,
-        notifPermission,
-        requestNotifPermission,
         markAllRead,
         refreshMembers,
       }}
