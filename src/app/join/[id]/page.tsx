@@ -46,6 +46,7 @@ type PeerInfo = {
   stream: MediaStream;
   name: string;
   lastPing: number;
+  isSharing?: boolean;
 };
 
 export default function GuestJoinPage() {
@@ -69,6 +70,7 @@ export default function GuestJoinPage() {
   const [joined, setJoined] = useState(false);
   const [mediaError, setMediaError] = useState<string | null>(null);
   const [elapsed, setElapsed] = useState(0);
+  const [activeShareId, setActiveShareId] = useState<string | null>(null);
 
   const localStreamRef = useRef<MediaStream | null>(null);
   const screenStreamRef = useRef<MediaStream | null>(null);
@@ -304,7 +306,31 @@ export default function GuestJoinPage() {
           try { p.pc.close(); } catch {}
           delete peersRef.current[payload.id];
           delete pendingIceRef.current[payload.id];
+          if (activeShareId === payload.id) setActiveShareId(null);
           updatePeers();
+        }
+      })
+      .on("broadcast", { event: "share" }, ({ payload }) => {
+        if (payload.id === guestId) return;
+        const p = peersRef.current[payload.id];
+        if (p) {
+          p.isSharing = true;
+          updatePeers();
+          setActiveShareId((cur) => cur ?? payload.id);
+        }
+      })
+      .on("broadcast", { event: "unshare" }, ({ payload }) => {
+        if (payload.id === guestId) return;
+        const p = peersRef.current[payload.id];
+        if (p) {
+          p.isSharing = false;
+          updatePeers();
+          if (activeShareId === payload.id) {
+            const nextShare = Object.entries(peersRef.current).find(
+              ([id, peer]) => peer.isSharing && id !== payload.id
+            );
+            setActiveShareId(nextShare ? nextShare[0] : null);
+          }
         }
       })
       .on("broadcast", { event: "ping" }, ({ payload }) => {
@@ -467,6 +493,11 @@ export default function GuestJoinPage() {
       const camTrack = localStreamRef.current?.getVideoTracks()[0];
       if (camTrack) await replaceVideoTrack(camTrack);
       setSharing(false);
+      signalChannelRef.current?.send({
+        type: "broadcast",
+        event: "unshare",
+        payload: { id: guestId },
+      });
     } else {
       try {
         const screen = await navigator.mediaDevices.getDisplayMedia({ video: true });
@@ -476,9 +507,19 @@ export default function GuestJoinPage() {
           const camTrack = localStreamRef.current?.getVideoTracks()[0];
           if (camTrack) await replaceVideoTrack(camTrack);
           setSharing(false);
+          signalChannelRef.current?.send({
+            type: "broadcast",
+            event: "unshare",
+            payload: { id: guestId },
+          });
         };
         await replaceVideoTrack(screenTrack);
         setSharing(true);
+        signalChannelRef.current?.send({
+          type: "broadcast",
+          event: "share",
+          payload: { id: guestId },
+        });
       } catch {}
     }
   };
@@ -531,11 +572,9 @@ export default function GuestJoinPage() {
   if (meetingEnded) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-neutral-950 text-neutral-400">
-        <div className="flex h-20 w-20 items-center justify-center rounded-full bg-red-500/10">
-          <IconPhoneOff className="h-10 w-10 text-red-500" />
-        </div>
-        <p className="text-lg font-semibold text-white">This meeting has ended</p>
-        <p className="text-sm text-neutral-500">The meeting was ended by the host.</p>
+        <img src="/logo.svg" alt="Grid & Logic" className="h-20 w-20 rounded-full" />
+        <p className="text-lg font-semibold text-white">Thanks for attending</p>
+        <p className="text-sm text-neutral-500">Regards, Grid &amp; Logic</p>
       </div>
     );
   }
@@ -590,6 +629,35 @@ export default function GuestJoinPage() {
   // --- Meeting room ---
   const peerList = Object.entries(peers);
   const totalParticipants = peerList.length + 1;
+
+  // Determine who is screen sharing
+  const remoteShares = peerList.filter(([_, p]) => p.isSharing);
+  const hasLocalShare = sharing;
+  const hasShares = remoteShares.length > 0 || hasLocalShare;
+
+  const allShares: { id: string; name: string; stream: MediaStream | null }[] = [];
+  if (hasLocalShare) {
+    allShares.push({
+      id: guestId,
+      name: "You",
+      stream: screenStreamRef.current ?? localStreamRef.current,
+    });
+  }
+  remoteShares.forEach(([id, p]) => {
+    allShares.push({ id, name: p.name, stream: p.stream });
+  });
+
+  const activeShare = allShares.find((s) => s.id === activeShareId) ?? allShares[0];
+
+  const thumbCols =
+    totalParticipants <= 2
+      ? "grid-cols-2"
+      : totalParticipants <= 4
+      ? "grid-cols-2 sm:grid-cols-4"
+      : totalParticipants <= 6
+      ? "grid-cols-3 sm:grid-cols-6"
+      : "grid-cols-4 sm:grid-cols-7";
+
   const gridCols =
     totalParticipants <= 1
       ? "grid-cols-1"
@@ -629,33 +697,99 @@ export default function GuestJoinPage() {
         </div>
       )}
 
-      {/* Video grid */}
-      <div className={`grid flex-1 gap-2 overflow-y-auto p-2 sm:gap-3 sm:p-3 md:p-4 ${gridCols}`}>
-        {/* Local video tile */}
-        <div className="relative min-h-36 overflow-hidden rounded-2xl bg-neutral-800 sm:min-h-48 md:min-h-56">
-          {camOn ? (
-            <video ref={localVideoRef} autoPlay muted playsInline className="h-full w-full object-cover" />
-          ) : (
-            <div className="flex h-full w-full items-center justify-center">
-              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-cyan-600 text-base font-bold text-white sm:h-16 sm:w-16 sm:text-xl md:h-20 md:w-20">
-                {guestName?.[0]?.toUpperCase()}
-              </div>
+      {/* Video area — Google Meet style */}
+      {hasShares && activeShare ? (
+        <div className="flex flex-1 flex-col overflow-hidden p-2 sm:p-3 md:p-4">
+          {/* Share tabs (only if more than one share) */}
+          {allShares.length > 1 && (
+            <div className="mb-2 flex flex-wrap gap-2">
+              {allShares.map((s) => (
+                <button
+                  key={s.id}
+                  onClick={() => setActiveShareId(s.id)}
+                  className={`flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs font-medium transition ${
+                    activeShare.id === s.id
+                      ? "bg-cyan-600 text-white"
+                      : "bg-neutral-800 text-neutral-300 hover:bg-neutral-700"
+                  }`}
+                >
+                  <IconScreenShare className="h-3.5 w-3.5" />
+                  {s.name}
+                </button>
+              ))}
             </div>
           )}
-          <div className="absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-black/70 to-transparent sm:h-16" />
-          <div className="absolute bottom-2 left-2 flex items-center gap-1.5 sm:left-3 sm:gap-2">
-            {!micOn && <IconMicrophoneOff className="h-3 w-3 text-red-400 sm:h-3.5 sm:w-3.5" />}
-            <span className="text-[10px] font-medium text-white sm:text-xs">
-              You (Guest) {sharing && "· sharing"}
-            </span>
+
+          {/* Center: large screen share */}
+          <div className="relative flex flex-1 items-center justify-center overflow-hidden rounded-2xl bg-neutral-900">
+            {activeShare.id === guestId ? (
+              <video
+                ref={localVideoRef}
+                autoPlay
+                muted
+                playsInline
+                className="h-full w-full object-contain"
+              />
+            ) : (
+              <GuestShareVideo stream={activeShare.stream} />
+            )}
+            <div className="absolute bottom-3 left-3 flex items-center gap-2 rounded-lg bg-black/60 px-3 py-1.5">
+              <IconScreenShare className="h-4 w-4 text-cyan-400" />
+              <span className="text-xs font-medium text-white">
+                {activeShare.name} is sharing
+              </span>
+            </div>
+          </div>
+
+          {/* Bottom: participant thumbnails */}
+          <div className={`mt-2 grid gap-2 ${thumbCols}`}>
+            {/* Local thumbnail */}
+            <GuestParticipantThumb
+              videoRef={localVideoRef}
+              camOn={camOn}
+              micOn={micOn}
+              name={`You${sharing ? " · sharing" : ""}`}
+              initials={guestName?.[0]?.toUpperCase() ?? "?"}
+              stream={localStreamRef.current}
+              highlight={sharing}
+            />
+            {/* Remote thumbnails */}
+            {peerList
+              .filter(([id]) => id !== activeShare?.id)
+              .map(([id, peer]) => (
+                <GuestRemoteThumb key={id} peer={peer} />
+              ))}
           </div>
         </div>
+      ) : (
+        /* Grid layout when no screen share */
+        <div className={`grid flex-1 gap-2 overflow-y-auto p-2 sm:gap-3 sm:p-3 md:p-4 ${gridCols}`}>
+          {/* Local video tile */}
+          <div className="relative min-h-36 overflow-hidden rounded-2xl bg-neutral-800 sm:min-h-48 md:min-h-56">
+            {camOn ? (
+              <video ref={localVideoRef} autoPlay muted playsInline className="h-full w-full object-cover" />
+            ) : (
+              <div className="flex h-full w-full items-center justify-center">
+                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-cyan-600 text-base font-bold text-white sm:h-16 sm:w-16 sm:text-xl md:h-20 md:w-20">
+                  {guestName?.[0]?.toUpperCase()}
+                </div>
+              </div>
+            )}
+            <div className="absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-black/70 to-transparent sm:h-16" />
+            <div className="absolute bottom-2 left-2 flex items-center gap-1.5 sm:left-3 sm:gap-2">
+              {!micOn && <IconMicrophoneOff className="h-3 w-3 text-red-400 sm:h-3.5 sm:w-3.5" />}
+              <span className="text-[10px] font-medium text-white sm:text-xs">
+                You (Guest) {sharing && "· sharing"}
+              </span>
+            </div>
+          </div>
 
-        {/* Remote video tiles */}
-        {peerList.map(([id, peer]) => (
-          <GuestRemoteVideo key={id} peer={peer} />
-        ))}
-      </div>
+          {/* Remote video tiles */}
+          {peerList.map(([id, peer]) => (
+            <GuestRemoteVideo key={id} peer={peer} />
+          ))}
+        </div>
+      )}
 
       {/* Bottom control bar */}
       <div className="flex items-center justify-center gap-1.5 px-2 py-3 sm:gap-2 sm:px-4 sm:py-4 md:gap-3">
@@ -774,5 +908,132 @@ function GuestControlButton({
     >
       {on ? onIcon : offIcon}
     </button>
+  );
+}
+
+function GuestShareVideo({ stream }: { stream: MediaStream | null }) {
+  const ref = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    const video = ref.current;
+    if (!video || !stream) return;
+    video.srcObject = stream;
+  }, [stream]);
+
+  if (!stream) return null;
+  return (
+    <video
+      ref={ref}
+      autoPlay
+      playsInline
+      className="h-full w-full object-contain"
+    />
+  );
+}
+
+function GuestParticipantThumb({
+  videoRef,
+  camOn,
+  micOn,
+  name,
+  initials,
+  stream,
+  highlight,
+}: {
+  videoRef: React.RefObject<HTMLVideoElement | null>;
+  camOn: boolean;
+  micOn: boolean;
+  name: string;
+  initials: string;
+  stream: MediaStream | null;
+  highlight?: boolean;
+}) {
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !stream) return;
+    if (video.srcObject !== stream) video.srcObject = stream;
+  }, [stream, videoRef]);
+
+  return (
+    <div className={`relative aspect-video min-h-20 overflow-hidden rounded-xl bg-neutral-800 ${highlight ? "ring-2 ring-cyan-500" : ""}`}>
+      {camOn ? (
+        <video
+          ref={videoRef}
+          autoPlay
+          muted
+          playsInline
+          className="h-full w-full object-cover"
+        />
+      ) : (
+        <div className="flex h-full w-full items-center justify-center">
+          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-cyan-600 text-xs font-bold text-white sm:h-10 sm:w-10 sm:text-sm">
+            {initials}
+          </div>
+        </div>
+      )}
+      <div className="absolute inset-x-0 bottom-0 h-6 bg-gradient-to-t from-black/70 to-transparent" />
+      <div className="absolute bottom-1 left-1.5 flex items-center gap-1">
+        {!micOn && <IconMicrophoneOff className="h-2.5 w-2.5 text-red-400" />}
+        <span className="text-[9px] font-medium text-white sm:text-[10px]">{name}</span>
+      </div>
+    </div>
+  );
+}
+
+function GuestRemoteThumb({ peer }: { peer: PeerInfo }) {
+  const ref = useRef<HTMLVideoElement>(null);
+  const [hasVideo, setHasVideo] = useState(false);
+
+  useEffect(() => {
+    const video = ref.current;
+    if (!video) return;
+
+    const updateStream = () => {
+      if (video.srcObject !== peer.stream) {
+        video.srcObject = peer.stream;
+      }
+      const tracks = peer.stream.getVideoTracks();
+      setHasVideo(tracks.length > 0 && tracks.some((t) => t.enabled && t.readyState === "live"));
+    };
+
+    updateStream();
+    const interval = setInterval(updateStream, 500);
+    peer.stream.addEventListener("addtrack", updateStream);
+    peer.stream.addEventListener("removetrack", updateStream);
+
+    return () => {
+      clearInterval(interval);
+      peer.stream.removeEventListener("addtrack", updateStream);
+      peer.stream.removeEventListener("removetrack", updateStream);
+    };
+  }, [peer.stream]);
+
+  const initials = peer.name
+    .split(" ")
+    .map((n) => n[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+
+  return (
+    <div className={`relative aspect-video min-h-20 overflow-hidden rounded-xl bg-neutral-800 ${peer.isSharing ? "ring-2 ring-cyan-500" : ""}`}>
+      <video
+        ref={ref}
+        autoPlay
+        playsInline
+        className={`h-full w-full object-cover ${hasVideo ? "" : "opacity-0"}`}
+      />
+      {!hasVideo && (
+        <div className="absolute inset-0 flex h-full w-full items-center justify-center">
+          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-neutral-600 text-xs font-bold text-white sm:h-10 sm:w-10 sm:text-sm">
+            {initials}
+          </div>
+        </div>
+      )}
+      <div className="absolute inset-x-0 bottom-0 h-6 bg-gradient-to-t from-black/70 to-transparent" />
+      <span className="absolute bottom-1 left-1.5 text-[9px] font-medium text-white sm:text-[10px]">
+        {peer.name}
+      </span>
+    </div>
   );
 }
