@@ -124,9 +124,15 @@ export default function MeetingRoomPage() {
         pc.addTrack(track, localStreamRef.current!);
       });
 
-      // Use e.track directly — e.streams[0] is undefined on some PC browsers
+      // Use e.streams[0] when available (most browsers) — this gives us a
+      // proper MediaStream from the browser. Fall back to adding e.track to
+      // our manually created stream for browsers where e.streams[0] is undefined.
       pc.ontrack = (e) => {
-        if (e.track) {
+        if (e.streams && e.streams[0]) {
+          // Replace the peer's stream with the browser-provided one
+          peersRef.current[remoteId].stream = e.streams[0];
+          e.streams[0].onremovetrack = () => updatePeers();
+        } else if (e.track) {
           if (!remoteStream.getTracks().some((rt) => rt.id === e.track.id)) {
             remoteStream.addTrack(e.track);
           }
@@ -455,6 +461,8 @@ export default function MeetingRoomPage() {
     router.push("/dashboard/meetings");
   };
 
+  const [showEndConfirm, setShowEndConfirm] = useState(false);
+
   const invite = async (userId: string) => {
     await supabase.from("meeting_participants").upsert(
       { meeting_id: meetingId, user_id: userId, invited: true },
@@ -469,7 +477,7 @@ export default function MeetingRoomPage() {
     });
   };
 
-  const guestLink = typeof window !== "undefined" ? `${window.location.origin}/join/${meetingId}` : "";
+  const guestLink = typeof window !== "undefined" ? `${window.location.origin}/join/${meetingId}?t=${Date.now()}` : "";
   const copyGuestLink = async () => {
     try {
       await navigator.clipboard.writeText(guestLink);
@@ -607,16 +615,34 @@ export default function MeetingRoomPage() {
           label={sharing ? "Stop sharing" : "Share screen"}
         />
         <div className="mx-1 h-8 w-px bg-neutral-700 sm:mx-2" />
-        <button
-          onClick={() => leaveMeeting(meeting?.created_by === myId)}
-          className="flex items-center gap-2 rounded-full bg-red-600 px-4 py-3 text-white transition hover:bg-red-500 sm:px-5"
-          title={meeting?.created_by === myId ? "End meeting for all" : "Leave meeting"}
-        >
-          <IconPhoneOff className="h-5 w-5" />
-          <span className="hidden text-sm font-medium sm:inline">
-            {meeting?.created_by === myId ? "End" : "Leave"}
-          </span>
-        </button>
+        {meeting?.created_by === myId ? (
+          <>
+            <button
+              onClick={() => leaveMeeting(false)}
+              className="flex items-center gap-2 rounded-full bg-neutral-800 px-4 py-3 text-white transition hover:bg-neutral-700 sm:px-5"
+              title="Leave meeting"
+            >
+              <IconPhoneOff className="h-5 w-5" />
+              <span className="hidden text-sm font-medium sm:inline">Leave</span>
+            </button>
+            <button
+              onClick={() => setShowEndConfirm(true)}
+              className="flex items-center gap-2 rounded-full bg-red-600 px-4 py-3 text-white transition hover:bg-red-500 sm:px-5"
+              title="End meeting for all"
+            >
+              <span className="text-sm font-medium">End all</span>
+            </button>
+          </>
+        ) : (
+          <button
+            onClick={() => leaveMeeting(false)}
+            className="flex items-center gap-2 rounded-full bg-red-600 px-4 py-3 text-white transition hover:bg-red-500 sm:px-5"
+            title="Leave meeting"
+          >
+            <IconPhoneOff className="h-5 w-5" />
+            <span className="hidden text-sm font-medium sm:inline">Leave</span>
+          </button>
+        )}
       </div>
 
       {showInvite && (
@@ -666,7 +692,7 @@ export default function MeetingRoomPage() {
                 </button>
               </div>
               <p className="mt-2 text-[10px] text-neutral-500">
-                Share this link with anyone outside your team. They just enter their name to join.
+                Share this link with anyone outside your team. They just enter their name to join. Link expires in 5 minutes.
               </p>
             </div>
 
@@ -697,23 +723,75 @@ export default function MeetingRoomPage() {
           </div>
         </div>
       )}
+
+      {showEndConfirm && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+          onClick={() => setShowEndConfirm(false)}
+        >
+          <div
+            className="w-full max-w-xs rounded-2xl border border-neutral-700 bg-neutral-900 p-5 text-center"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-red-500/10">
+              <IconPhoneOff className="h-7 w-7 text-red-500" />
+            </div>
+            <h2 className="mt-3 font-semibold text-white">End meeting for everyone?</h2>
+            <p className="mt-1 text-xs text-neutral-500">
+              All participants will be disconnected and the meeting will be marked as ended.
+            </p>
+            <div className="mt-4 flex gap-2">
+              <button
+                onClick={() => setShowEndConfirm(false)}
+                className="flex-1 rounded-lg bg-neutral-800 py-2.5 text-sm font-medium text-white transition hover:bg-neutral-700"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => leaveMeeting(true)}
+                className="flex-1 rounded-lg bg-red-600 py-2.5 text-sm font-medium text-white transition hover:bg-red-500"
+              >
+                End all
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
 function RemoteVideo({ peer }: { peer: PeerInfo }) {
   const ref = useRef<HTMLVideoElement>(null);
-  const [hasVideo, setHasVideo] = useState(true);
+  const [hasVideo, setHasVideo] = useState(false);
 
   useEffect(() => {
-    if (ref.current) ref.current.srcObject = peer.stream;
-    const checkVideo = () => {
+    const video = ref.current;
+    if (!video) return;
+
+    const updateStream = () => {
+      if (video.srcObject !== peer.stream) {
+        video.srcObject = peer.stream;
+      }
       const tracks = peer.stream.getVideoTracks();
-      setHasVideo(tracks.length > 0 && tracks[0].enabled && tracks[0].readyState === "live");
+      const hasVid = tracks.length > 0 && tracks.some((t) => t.enabled && t.readyState === "live");
+      setHasVideo(hasVid);
     };
-    checkVideo();
-    const interval = setInterval(checkVideo, 1000);
-    return () => clearInterval(interval);
+
+    updateStream();
+
+    // Poll for track changes (covers addtrack/removetrack that might not fire)
+    const interval = setInterval(updateStream, 500);
+
+    // Also listen for track events on the stream
+    peer.stream.addEventListener("addtrack", updateStream);
+    peer.stream.addEventListener("removetrack", updateStream);
+
+    return () => {
+      clearInterval(interval);
+      peer.stream.removeEventListener("addtrack", updateStream);
+      peer.stream.removeEventListener("removetrack", updateStream);
+    };
   }, [peer.stream]);
 
   const initials = peer.name

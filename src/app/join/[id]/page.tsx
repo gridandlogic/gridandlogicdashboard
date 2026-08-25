@@ -44,6 +44,7 @@ export default function GuestJoinPage() {
   const [entered, setEntered] = useState(false);
   const [meetingEnded, setMeetingEnded] = useState(false);
   const [notFound, setNotFound] = useState(false);
+  const [linkExpired, setLinkExpired] = useState(false);
 
   // WebRTC state
   const [micOn, setMicOn] = useState(true);
@@ -65,9 +66,22 @@ export default function GuestJoinPage() {
 
   const guestId = useRef(`guest-${Math.random().toString(36).slice(2, 11)}`).current;
 
-  // Check meeting exists and status
+  // Check meeting exists, status, and link expiry
   useEffect(() => {
     const check = async () => {
+      // Check link expiry (5 minutes = 300000 ms)
+      if (typeof window !== "undefined") {
+        const urlParams = new URLSearchParams(window.location.search);
+        const linkTime = urlParams.get("t");
+        if (linkTime) {
+          const elapsed = Date.now() - parseInt(linkTime, 10);
+          if (elapsed > 5 * 60 * 1000) {
+            setLinkExpired(true);
+            return;
+          }
+        }
+      }
+
       const { data: mtg } = await supabase
         .from("meetings")
         .select("*")
@@ -167,7 +181,10 @@ export default function GuestJoinPage() {
       });
 
       pc.ontrack = (e) => {
-        if (e.track) {
+        if (e.streams && e.streams[0]) {
+          peersRef.current[remoteId].stream = e.streams[0];
+          e.streams[0].onremovetrack = () => updatePeers();
+        } else if (e.track) {
           if (!remoteStream.getTracks().some((rt) => rt.id === e.track.id)) {
             remoteStream.addTrack(e.track);
           }
@@ -430,6 +447,18 @@ export default function GuestJoinPage() {
   };
 
   // --- Landing screen: enter name ---
+  if (linkExpired) {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-neutral-950 text-neutral-400">
+        <div className="flex h-20 w-20 items-center justify-center rounded-full bg-amber-500/10">
+          <IconPhoneOff className="h-10 w-10 text-amber-500" />
+        </div>
+        <p className="text-lg font-semibold text-white">Link expired</p>
+        <p className="text-sm text-neutral-500">This invite link has expired (valid for 5 minutes). Ask the host for a new link.</p>
+      </div>
+    );
+  }
+
   if (notFound) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-neutral-950 text-neutral-400">
@@ -607,17 +636,33 @@ export default function GuestJoinPage() {
 
 function GuestRemoteVideo({ peer }: { peer: PeerInfo }) {
   const ref = useRef<HTMLVideoElement>(null);
-  const [hasVideo, setHasVideo] = useState(true);
+  const [hasVideo, setHasVideo] = useState(false);
 
   useEffect(() => {
-    if (ref.current) ref.current.srcObject = peer.stream;
-    const checkVideo = () => {
+    const video = ref.current;
+    if (!video) return;
+
+    const updateStream = () => {
+      if (video.srcObject !== peer.stream) {
+        video.srcObject = peer.stream;
+      }
       const tracks = peer.stream.getVideoTracks();
-      setHasVideo(tracks.length > 0 && tracks[0].enabled && tracks[0].readyState === "live");
+      const hasVid = tracks.length > 0 && tracks.some((t) => t.enabled && t.readyState === "live");
+      setHasVideo(hasVid);
     };
-    checkVideo();
-    const interval = setInterval(checkVideo, 1000);
-    return () => clearInterval(interval);
+
+    updateStream();
+
+    const interval = setInterval(updateStream, 500);
+
+    peer.stream.addEventListener("addtrack", updateStream);
+    peer.stream.addEventListener("removetrack", updateStream);
+
+    return () => {
+      clearInterval(interval);
+      peer.stream.removeEventListener("addtrack", updateStream);
+      peer.stream.removeEventListener("removetrack", updateStream);
+    };
   }, [peer.stream]);
 
   const initials = peer.name
