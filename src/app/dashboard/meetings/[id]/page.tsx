@@ -129,8 +129,15 @@ export default function MeetingRoomPage() {
       // our manually created stream for browsers where e.streams[0] is undefined.
       pc.ontrack = (e) => {
         if (e.streams && e.streams[0]) {
-          // Replace the peer's stream with the browser-provided one
-          peersRef.current[remoteId].stream = e.streams[0];
+          // Create a NEW peer object with the browser-provided stream so
+          // React detects the change and RemoteVideo re-renders.
+          const oldPeer = peersRef.current[remoteId];
+          peersRef.current[remoteId] = {
+            pc,
+            stream: e.streams[0],
+            name: oldPeer?.name ?? remoteName,
+            lastPing: oldPeer?.lastPing ?? Date.now(),
+          };
           e.streams[0].onremovetrack = () => updatePeers();
         } else if (e.track) {
           if (!remoteStream.getTracks().some((rt) => rt.id === e.track.id)) {
@@ -477,10 +484,11 @@ export default function MeetingRoomPage() {
     });
   };
 
-  const guestLink = typeof window !== "undefined" ? `${window.location.origin}/join/${meetingId}?t=${Date.now()}` : "";
+  const guestLinkBase = typeof window !== "undefined" ? `${window.location.origin}/join/${meetingId}` : "";
   const copyGuestLink = async () => {
+    const link = `${guestLinkBase}?t=${Date.now()}`;
     try {
-      await navigator.clipboard.writeText(guestLink);
+      await navigator.clipboard.writeText(link);
       setCopiedLink(true);
       setTimeout(() => setCopiedLink(false), 2000);
     } catch {}
@@ -676,7 +684,7 @@ export default function MeetingRoomPage() {
               <div className="mt-2 flex items-center gap-2">
                 <input
                   readOnly
-                  value={guestLink}
+                  value={guestLinkBase}
                   className="flex-1 truncate rounded-lg bg-neutral-900 px-3 py-2 text-xs text-neutral-400 outline-none"
                 />
                 <button

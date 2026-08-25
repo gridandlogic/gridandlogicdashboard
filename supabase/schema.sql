@@ -308,11 +308,16 @@ create policy "messages insert" on public.messages for insert to authenticated
 create policy "meetings select" on public.meetings for select to authenticated using (public.is_approved());
 create policy "meetings insert" on public.meetings for insert to authenticated with check (public.is_approved() and created_by = auth.uid());
 create policy "meetings update" on public.meetings for update to authenticated using (created_by = auth.uid() or public.is_admin());
+-- Guests (unauthenticated) can select live meetings so they can join via link
+create policy "meetings guest select" on public.meetings for select to anon using (status = 'live');
 
 -- meeting participants (guests have no user_id, so allow if user_id is null)
 create policy "participants select" on public.meeting_participants for select to authenticated using (public.is_approved() or user_id is null);
 create policy "participants upsert" on public.meeting_participants for insert to authenticated with check (public.is_approved() or user_id is null);
 create policy "participants update" on public.meeting_participants for update to authenticated using (public.is_approved() or user_id is null);
+-- Guests can insert themselves as participants with guest_id
+create policy "participants guest insert" on public.meeting_participants for insert to anon with check (guest_id is not null);
+create policy "participants guest select" on public.meeting_participants for select to anon using (guest_id is not null);
 
 -- push subscriptions: user manages own subscriptions
 create policy "push subs select" on public.push_subscriptions for select to authenticated using (user_id = auth.uid());

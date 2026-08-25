@@ -182,7 +182,13 @@ export default function GuestJoinPage() {
 
       pc.ontrack = (e) => {
         if (e.streams && e.streams[0]) {
-          peersRef.current[remoteId].stream = e.streams[0];
+          const oldPeer = peersRef.current[remoteId];
+          peersRef.current[remoteId] = {
+            pc,
+            stream: e.streams[0],
+            name: oldPeer?.name ?? "Peer",
+            lastPing: oldPeer?.lastPing ?? Date.now(),
+          };
           e.streams[0].onremovetrack = () => updatePeers();
         } else if (e.track) {
           if (!remoteStream.getTracks().some((rt) => rt.id === e.track.id)) {
