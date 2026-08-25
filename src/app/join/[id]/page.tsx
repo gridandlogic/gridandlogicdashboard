@@ -716,10 +716,14 @@ function GuestRemoteVideo({ peer }: { peer: PeerInfo }) {
 
   return (
     <div className="relative min-h-36 overflow-hidden rounded-2xl bg-neutral-800 sm:min-h-48 md:min-h-56">
-      {hasVideo ? (
-        <video ref={ref} autoPlay playsInline className="h-full w-full object-cover" />
-      ) : (
-        <div className="flex h-full w-full items-center justify-center">
+      <video
+        ref={ref}
+        autoPlay
+        playsInline
+        className={`h-full w-full object-cover ${hasVideo ? "" : "opacity-0"}`}
+      />
+      {!hasVideo && (
+        <div className="absolute inset-0 flex h-full w-full items-center justify-center">
           <div className="flex h-12 w-12 items-center justify-center rounded-full bg-neutral-600 text-base font-bold text-white sm:h-16 sm:w-16 sm:text-xl md:h-20 md:w-20">
             {initials}
           </div>
