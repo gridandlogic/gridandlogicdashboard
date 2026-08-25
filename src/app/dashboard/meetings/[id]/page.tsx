@@ -14,14 +14,18 @@ import {
   IconPhoneOff,
   IconUserPlus,
   IconX,
-  IconDotsVertical,
   IconUsers,
+  IconCopy,
+  IconCheck,
+  IconLink,
 } from "@tabler/icons-react";
 
 const ICE_SERVERS: RTCConfiguration = {
   iceServers: [
     { urls: "stun:stun.l.google.com:19302" },
     { urls: "stun:stun1.l.google.com:19302" },
+    { urls: "stun:stun2.l.google.com:19302" },
+    { urls: "stun:stun3.l.google.com:19302" },
   ],
 };
 
@@ -29,6 +33,7 @@ type PeerInfo = {
   pc: RTCPeerConnection;
   stream: MediaStream;
   name: string;
+  lastPing: number;
 };
 
 export default function MeetingRoomPage() {
@@ -46,6 +51,8 @@ export default function MeetingRoomPage() {
   const [joined, setJoined] = useState(false);
   const [mediaError, setMediaError] = useState<string | null>(null);
   const [elapsed, setElapsed] = useState(0);
+  const [meetingEnded, setMeetingEnded] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
 
   const localStreamRef = useRef<MediaStream | null>(null);
   const screenStreamRef = useRef<MediaStream | null>(null);
@@ -53,6 +60,7 @@ export default function MeetingRoomPage() {
   const peersRef = useRef<Record<string, PeerInfo>>({});
   const signalChannelRef = useRef<RealtimeChannel | null>(null);
   const pendingIceRef = useRef<Record<string, RTCIceCandidate[]>>({});
+  const cleanupRef = useRef<(() => void) | null>(null);
 
   const myId = profile.id;
 
@@ -74,11 +82,16 @@ export default function MeetingRoomPage() {
 
   const createPeer = useCallback(
     (remoteId: string, remoteName: string, initiator: boolean) => {
-      if (peersRef.current[remoteId]) return peersRef.current[remoteId].pc;
+      // If peer already exists, close it first (handles reconnection after brief disconnect)
+      const existing = peersRef.current[remoteId];
+      if (existing) {
+        try { existing.pc.close(); } catch {}
+        delete peersRef.current[remoteId];
+      }
 
       const pc = new RTCPeerConnection(ICE_SERVERS);
       const remoteStream = new MediaStream();
-      peersRef.current[remoteId] = { pc, stream: remoteStream, name: remoteName };
+      peersRef.current[remoteId] = { pc, stream: remoteStream, name: remoteName, lastPing: Date.now() };
       pendingIceRef.current[remoteId] = [];
       updatePeers();
 
@@ -140,16 +153,12 @@ export default function MeetingRoomPage() {
         }
       };
 
-      // Only remove on failed/closed — "disconnected" is temporary and
-      // removing the peer kicks the 3rd person on minor network blips.
+      // Never delete peers on connection state changes — only on explicit "leave"
+      // broadcast or heartbeat timeout. This prevents auto-kicking when mobile
+      // browsers suspend the page or on brief network blips.
       pc.onconnectionstatechange = () => {
         if (pc.connectionState === "failed") {
           pc.restartIce();
-        }
-        if (pc.connectionState === "closed") {
-          delete peersRef.current[remoteId];
-          delete pendingIceRef.current[remoteId];
-          updatePeers();
         }
       };
 
@@ -179,15 +188,17 @@ export default function MeetingRoomPage() {
 
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: true,
-          audio: true,
+          video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } },
+          audio: { echoCancellation: true, noiseSuppression: true },
         });
         localStreamRef.current = stream;
         if (localVideoRef.current) localVideoRef.current.srcObject = stream;
       } catch {
         setMediaError("Could not access camera/microphone. Check permissions.");
         try {
-          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          const stream = await navigator.mediaDevices.getUserMedia({
+            audio: { echoCancellation: true, noiseSuppression: true },
+          });
           localStreamRef.current = stream;
           setCamOn(false);
         } catch {
@@ -220,11 +231,24 @@ export default function MeetingRoomPage() {
           }
         })
         .on("broadcast", { event: "leave" }, ({ payload }) => {
+          if (payload.id === myId) return;
           const p = peersRef.current[payload.id];
           if (p) {
-            p.pc.close();
+            try { p.pc.close(); } catch {}
             delete peersRef.current[payload.id];
+            delete pendingIceRef.current[payload.id];
             updatePeers();
+          }
+        })
+        .on("broadcast", { event: "ping" }, ({ payload }) => {
+          if (payload.id !== myId) {
+            const p = peersRef.current[payload.id];
+            if (p) {
+              p.lastPing = Date.now();
+            } else {
+              // Someone is alive but we don't have a peer — create one
+              createPeer(payload.id, payload.name, true);
+            }
           }
         })
         .on("broadcast", { event: "signal" }, async ({ payload }) => {
@@ -292,18 +316,74 @@ export default function MeetingRoomPage() {
             setJoined(true);
           }
         });
+
+      // Heartbeat: ping every 15s so others know we're alive
+      const heartbeat = setInterval(() => {
+        channel.send({
+          type: "broadcast",
+          event: "ping",
+          payload: {
+            id: myId,
+            name: `${profile.first_name} ${profile.last_name}`,
+          },
+        });
+      }, 15000);
+
+      // Stale check: remove peers we haven't heard from in 45s
+      const staleCheck = setInterval(() => {
+        const now = Date.now();
+        let changed = false;
+        for (const [id, p] of Object.entries(peersRef.current)) {
+          if (now - p.lastPing > 45000) {
+            try { p.pc.close(); } catch {}
+            delete peersRef.current[id];
+            delete pendingIceRef.current[id];
+            changed = true;
+          }
+        }
+        if (changed) updatePeers();
+      }, 20000);
+
+      // Subscribe to meeting status changes (ended by host)
+      const meetingChannel = supabase
+        .channel(`meeting-status-${meetingId}`)
+        .on(
+          "postgres_changes",
+          {
+            event: "UPDATE",
+            schema: "public",
+            table: "meetings",
+            filter: `id=eq.${meetingId}`,
+          },
+          (payload) => {
+            const updated = payload.new as Meeting;
+            if (updated.status === "ended") {
+              setMeetingEnded(true);
+            }
+          }
+        )
+        .subscribe();
+
+      return () => {
+        clearInterval(heartbeat);
+        clearInterval(staleCheck);
+        supabase.removeChannel(meetingChannel);
+      };
     };
 
-    join();
+    join().then((cleanup) => {
+      if (cleanup) cleanupRef.current = cleanup;
+    });
 
     return () => {
       cancelled = true;
+      if (cleanupRef.current) cleanupRef.current();
       signalChannelRef.current?.send({
         type: "broadcast",
         event: "leave",
         payload: { id: myId },
       });
-      Object.values(peersRef.current).forEach((p) => p.pc.close());
+      Object.values(peersRef.current).forEach((p) => { try { p.pc.close(); } catch {} });
       peersRef.current = {};
       localStreamRef.current?.getTracks().forEach((t) => t.stop());
       screenStreamRef.current?.getTracks().forEach((t) => t.stop());
@@ -389,7 +469,16 @@ export default function MeetingRoomPage() {
     });
   };
 
-  if (meeting?.status === "ended") {
+  const guestLink = typeof window !== "undefined" ? `${window.location.origin}/join/${meetingId}` : "";
+  const copyGuestLink = async () => {
+    try {
+      await navigator.clipboard.writeText(guestLink);
+      setCopiedLink(true);
+      setTimeout(() => setCopiedLink(false), 2000);
+    } catch {}
+  };
+
+  if (meetingEnded || meeting?.status === "ended") {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-4 bg-neutral-950 text-neutral-400">
         <div className="flex h-20 w-20 items-center justify-center rounded-full bg-red-500/10">
@@ -458,9 +547,9 @@ export default function MeetingRoomPage() {
       )}
 
       {/* Video grid — Google Meet style tiles */}
-      <div className={`grid flex-1 gap-3 overflow-y-auto p-3 md:p-4 ${gridCols}`}>
+      <div className={`grid flex-1 gap-2 overflow-y-auto p-2 sm:gap-3 sm:p-3 md:p-4 ${gridCols}`}>
         {/* Local video tile */}
-        <div className="relative min-h-48 overflow-hidden rounded-2xl bg-neutral-800 md:min-h-56">
+        <div className="relative min-h-36 overflow-hidden rounded-2xl bg-neutral-800 sm:min-h-48 md:min-h-56">
           {camOn ? (
             <video
               ref={localVideoRef}
@@ -471,18 +560,18 @@ export default function MeetingRoomPage() {
             />
           ) : (
             <div className="flex h-full w-full items-center justify-center">
-              <div className="flex h-16 w-16 items-center justify-center rounded-full bg-cyan-600 text-xl font-bold text-white md:h-20 md:w-20">
+              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-cyan-600 text-base font-bold text-white sm:h-16 sm:w-16 sm:text-xl md:h-20 md:w-20">
                 {profile.first_name?.[0]}
                 {profile.last_name?.[0]}
               </div>
             </div>
           )}
-          <div className="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-black/70 to-transparent" />
-          <div className="absolute bottom-2 left-3 flex items-center gap-2">
+          <div className="absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-black/70 to-transparent sm:h-16" />
+          <div className="absolute bottom-2 left-2 flex items-center gap-1.5 sm:left-3 sm:gap-2">
             {!micOn && (
-              <IconMicrophoneOff className="h-3.5 w-3.5 text-red-400" />
+              <IconMicrophoneOff className="h-3 w-3 text-red-400 sm:h-3.5 sm:w-3.5" />
             )}
-            <span className="text-xs font-medium text-white">
+            <span className="text-[10px] font-medium text-white sm:text-xs">
               You {sharing && "· sharing"}
             </span>
           </div>
@@ -495,7 +584,7 @@ export default function MeetingRoomPage() {
       </div>
 
       {/* Bottom control bar — Google Meet style */}
-      <div className="flex items-center justify-center gap-2 px-4 py-4 md:gap-3">
+      <div className="flex items-center justify-center gap-1.5 px-2 py-3 sm:gap-2 sm:px-4 sm:py-4 md:gap-3">
         <MeetControlButton
           on={micOn}
           onClick={toggleMic}
@@ -517,16 +606,10 @@ export default function MeetingRoomPage() {
           offIcon={<IconScreenShareOff className="h-5 w-5" />}
           label={sharing ? "Stop sharing" : "Share screen"}
         />
-        <button
-          className="flex h-12 w-12 items-center justify-center rounded-full bg-neutral-800 text-neutral-300 hover:bg-neutral-700 md:hidden"
-          title="More"
-        >
-          <IconDotsVertical className="h-5 w-5" />
-        </button>
-        <div className="mx-1 h-8 w-px bg-neutral-700 md:mx-2" />
+        <div className="mx-1 h-8 w-px bg-neutral-700 sm:mx-2" />
         <button
           onClick={() => leaveMeeting(meeting?.created_by === myId)}
-          className="flex items-center gap-2 rounded-full bg-red-600 px-5 py-3 text-white transition hover:bg-red-500"
+          className="flex items-center gap-2 rounded-full bg-red-600 px-4 py-3 text-white transition hover:bg-red-500 sm:px-5"
           title={meeting?.created_by === myId ? "End meeting for all" : "Leave meeting"}
         >
           <IconPhoneOff className="h-5 w-5" />
@@ -557,7 +640,40 @@ export default function MeetingRoomPage() {
             <p className="mt-2 text-xs text-neutral-500">
               Invite teammates to this meeting. They&apos;ll get a notification.
             </p>
-            <div className="mt-4 flex max-h-64 flex-col gap-1 overflow-y-auto">
+
+            {/* Guest link section */}
+            <div className="mt-4 rounded-xl border border-neutral-700 bg-neutral-800/50 p-3">
+              <div className="flex items-center gap-2 text-xs font-medium text-neutral-300">
+                <IconLink className="h-4 w-4 text-cyan-400" />
+                Invite a client (no account needed)
+              </div>
+              <div className="mt-2 flex items-center gap-2">
+                <input
+                  readOnly
+                  value={guestLink}
+                  className="flex-1 truncate rounded-lg bg-neutral-900 px-3 py-2 text-xs text-neutral-400 outline-none"
+                />
+                <button
+                  onClick={copyGuestLink}
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-cyan-600 text-white transition hover:bg-cyan-500"
+                  title="Copy link"
+                >
+                  {copiedLink ? (
+                    <IconCheck className="h-4 w-4" />
+                  ) : (
+                    <IconCopy className="h-4 w-4" />
+                  )}
+                </button>
+              </div>
+              <p className="mt-2 text-[10px] text-neutral-500">
+                Share this link with anyone outside your team. They just enter their name to join.
+              </p>
+            </div>
+
+            {/* Team members section */}
+            <div className="mt-4">
+              <p className="mb-2 text-xs font-medium text-neutral-400">Invite teammates</p>
+              <div className="flex max-h-48 flex-col gap-1 overflow-y-auto">
               {members
                 .filter((m) => m.id !== myId && m.status === "approved")
                 .map((m) => (
@@ -576,6 +692,7 @@ export default function MeetingRoomPage() {
                     <span className="text-xs font-medium text-cyan-500">Invite</span>
                   </button>
                 ))}
+              </div>
             </div>
           </div>
         </div>
@@ -607,18 +724,18 @@ function RemoteVideo({ peer }: { peer: PeerInfo }) {
     .toUpperCase();
 
   return (
-    <div className="relative min-h-48 overflow-hidden rounded-2xl bg-neutral-800 md:min-h-56">
+    <div className="relative min-h-36 overflow-hidden rounded-2xl bg-neutral-800 sm:min-h-48 md:min-h-56">
       {hasVideo ? (
         <video ref={ref} autoPlay playsInline className="h-full w-full object-cover" />
       ) : (
         <div className="flex h-full w-full items-center justify-center">
-          <div className="flex h-16 w-16 items-center justify-center rounded-full bg-neutral-600 text-xl font-bold text-white md:h-20 md:w-20">
+          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-neutral-600 text-base font-bold text-white sm:h-16 sm:w-16 sm:text-xl md:h-20 md:w-20">
             {initials}
           </div>
         </div>
       )}
-      <div className="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-black/70 to-transparent" />
-      <span className="absolute bottom-2 left-3 text-xs font-medium text-white">
+      <div className="absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-black/70 to-transparent sm:h-16" />
+      <span className="absolute bottom-2 left-2 text-[10px] font-medium text-white sm:left-3 sm:text-xs">
         {peer.name}
       </span>
     </div>
@@ -642,7 +759,7 @@ function MeetControlButton({
     <button
       onClick={onClick}
       title={label}
-      className={`flex h-12 w-12 items-center justify-center rounded-full transition md:h-14 md:w-14 ${
+      className={`flex h-10 w-10 items-center justify-center rounded-full transition sm:h-12 sm:w-12 md:h-14 md:w-14 ${
         on
           ? "bg-neutral-800 text-white hover:bg-neutral-700"
           : "bg-red-500/20 text-red-400 hover:bg-red-500/30"

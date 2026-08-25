@@ -87,6 +87,39 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         }
       }
 
+      // Register service worker and subscribe to web push
+      if (typeof window !== "undefined" && "serviceWorker" in navigator) {
+        try {
+          const reg = await navigator.serviceWorker.register("/sw.js");
+          const vapidKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
+          if (vapidKey && window.Notification.permission === "granted") {
+            const existing = await reg.pushManager.getSubscription();
+            if (!existing) {
+              const sub = await reg.pushManager.subscribe({
+                userVisibleOnly: true,
+                applicationServerKey: vapidKey,
+              });
+              await fetch("/api/push/subscribe", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  subscription: {
+                    endpoint: sub.endpoint,
+                    keys: sub.getKey("p256dh") && sub.getKey("auth")
+                      ? {
+                          p256dh: btoa(String.fromCharCode(...new Uint8Array(sub.getKey("p256dh")!))),
+                          auth: btoa(String.fromCharCode(...new Uint8Array(sub.getKey("auth")!))),
+                        }
+                      : {},
+                  },
+                  userId: user.id,
+                }),
+              });
+            }
+          }
+        } catch {}
+      }
+
       notifChannel = supabase
         .channel("user-notifications")
         .on(
@@ -100,10 +133,23 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           (payload) => {
             const n = payload.new as Notification;
             setNotifications((prev) => [n, ...prev]);
+            // Send web push notification (works on mobile when app is backgrounded)
+            fetch("/api/push/send", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                userId: user.id,
+                title: n.title,
+                body: n.body ?? "",
+                url: n.link ?? "/dashboard",
+              }),
+            }).catch(() => {});
+            // Also show in-browser notification if page is focused
             if (
               typeof window !== "undefined" &&
               "Notification" in window &&
-              window.Notification.permission === "granted"
+              window.Notification.permission === "granted" &&
+              document.visibilityState !== "visible"
             ) {
               const browserNotif = new window.Notification(n.title, {
                 body: n.body ?? undefined,

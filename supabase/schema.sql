@@ -90,10 +90,22 @@ create table if not exists public.meetings (
 create table if not exists public.meeting_participants (
   id uuid primary key default gen_random_uuid(),
   meeting_id uuid not null references public.meetings(id) on delete cascade,
-  user_id uuid not null references public.profiles(id) on delete cascade,
+  user_id uuid references public.profiles(id) on delete cascade,
+  guest_id text,
+  guest_name text,
   invited boolean not null default false,
   joined_at timestamptz,
-  unique (meeting_id, user_id)
+  unique (meeting_id, user_id),
+  unique (meeting_id, guest_id)
+);
+
+-- ---------- PUSH SUBSCRIPTIONS ----------
+create table if not exists public.push_subscriptions (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.profiles(id) on delete cascade,
+  endpoint text not null,
+  keys jsonb not null,
+  created_at timestamptz not null default now()
 );
 
 -- ---------- NOTIFICATIONS ----------
@@ -219,6 +231,7 @@ alter table public.messages enable row level security;
 alter table public.meetings enable row level security;
 alter table public.meeting_participants enable row level security;
 alter table public.notifications enable row level security;
+alter table public.push_subscriptions enable row level security;
 
 -- profiles
 create policy "profiles readable by authenticated" on public.profiles
@@ -296,10 +309,15 @@ create policy "meetings select" on public.meetings for select to authenticated u
 create policy "meetings insert" on public.meetings for insert to authenticated with check (public.is_approved() and created_by = auth.uid());
 create policy "meetings update" on public.meetings for update to authenticated using (created_by = auth.uid() or public.is_admin());
 
--- meeting participants
-create policy "participants select" on public.meeting_participants for select to authenticated using (public.is_approved());
-create policy "participants upsert" on public.meeting_participants for insert to authenticated with check (public.is_approved());
-create policy "participants update" on public.meeting_participants for update to authenticated using (public.is_approved());
+-- meeting participants (guests have no user_id, so allow if user_id is null)
+create policy "participants select" on public.meeting_participants for select to authenticated using (public.is_approved() or user_id is null);
+create policy "participants upsert" on public.meeting_participants for insert to authenticated with check (public.is_approved() or user_id is null);
+create policy "participants update" on public.meeting_participants for update to authenticated using (public.is_approved() or user_id is null);
+
+-- push subscriptions: user manages own subscriptions
+create policy "push subs select" on public.push_subscriptions for select to authenticated using (user_id = auth.uid());
+create policy "push subs insert" on public.push_subscriptions for insert to authenticated with check (user_id = auth.uid());
+create policy "push subs delete" on public.push_subscriptions for delete to authenticated using (user_id = auth.uid());
 
 -- notifications: user reads own; any approved user may create (invites, assignments)
 create policy "notifications select" on public.notifications for select to authenticated using (user_id = auth.uid());
@@ -317,6 +335,7 @@ alter publication supabase_realtime add table public.task_comments;
 alter publication supabase_realtime add table public.meetings;
 alter publication supabase_realtime add table public.meeting_participants;
 alter publication supabase_realtime add table public.notifications;
+alter publication supabase_realtime add table public.push_subscriptions;
 
 -- =============================================================
 -- STORAGE (attachments bucket: any file type + voice messages)
