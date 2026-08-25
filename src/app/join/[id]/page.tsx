@@ -484,7 +484,22 @@ export default function GuestJoinPage() {
   };
 
   const leaveMeeting = () => {
-    // Show meeting ended screen instead of redirecting to login
+    // Send leave broadcast so host removes our video
+    signalChannelRef.current?.send({
+      type: "broadcast",
+      event: "leave",
+      payload: { id: guestId },
+    });
+    // Close all peer connections
+    Object.values(peersRef.current).forEach((p) => { try { p.pc.close(); } catch {} });
+    peersRef.current = {};
+    // Stop local tracks
+    localStreamRef.current?.getTracks().forEach((t) => t.stop());
+    screenStreamRef.current?.getTracks().forEach((t) => t.stop());
+    // Remove channel
+    if (signalChannelRef.current) supabase.removeChannel(signalChannelRef.current);
+    if (cleanupRef.current) cleanupRef.current();
+    // Show meeting ended screen
     setMeetingEnded(true);
   };
 

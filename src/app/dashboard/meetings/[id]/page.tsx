@@ -496,6 +496,19 @@ export default function MeetingRoomPage() {
   };
 
   const leaveMeeting = async (endForAll: boolean) => {
+    // Send leave broadcast so others remove our video
+    signalChannelRef.current?.send({
+      type: "broadcast",
+      event: "leave",
+      payload: { id: myId },
+    });
+    // Close all peers and stop tracks
+    Object.values(peersRef.current).forEach((p) => { try { p.pc.close(); } catch {} });
+    peersRef.current = {};
+    localStreamRef.current?.getTracks().forEach((t) => t.stop());
+    screenStreamRef.current?.getTracks().forEach((t) => t.stop());
+    if (cleanupRef.current) cleanupRef.current();
+
     if (endForAll && meeting?.created_by === myId) {
       await supabase
         .from("meetings")
@@ -506,8 +519,23 @@ export default function MeetingRoomPage() {
   };
 
   const [showEndConfirm, setShowEndConfirm] = useState(false);
+  const [invitedUsers, setInvitedUsers] = useState<Record<string, number>>({});
+  const [, setTick] = useState(0);
+
+  useEffect(() => {
+    const hasActiveCooldown = Object.values(invitedUsers).some(
+      (t) => Date.now() - t < 10000
+    );
+    if (!hasActiveCooldown) return;
+    const interval = setInterval(() => setTick((t) => t + 1), 1000);
+    return () => clearInterval(interval);
+  }, [invitedUsers]);
 
   const invite = async (userId: string) => {
+    // Check cooldown
+    const lastInvite = invitedUsers[userId];
+    if (lastInvite && Date.now() - lastInvite < 10000) return;
+
     await supabase.from("meeting_participants").upsert(
       { meeting_id: meetingId, user_id: userId, invited: true },
       { onConflict: "meeting_id,user_id" }
@@ -519,6 +547,16 @@ export default function MeetingRoomPage() {
       body: `${profile.first_name} invited you to "${meeting?.title}"`,
       link: `/dashboard/meetings/${meetingId}`,
     });
+
+    // Set cooldown
+    setInvitedUsers((prev) => ({ ...prev, [userId]: Date.now() }));
+  };
+
+  const getInviteCooldown = (userId: string): number => {
+    const last = invitedUsers[userId];
+    if (!last) return 0;
+    const remaining = Math.ceil((10000 - (Date.now() - last)) / 1000);
+    return remaining > 0 ? remaining : 0;
   };
 
   const guestLinkBase = typeof window !== "undefined" ? `${window.location.origin}/join/${meetingId}` : "";
@@ -747,22 +785,28 @@ export default function MeetingRoomPage() {
               <div className="flex max-h-48 flex-col gap-1 overflow-y-auto">
               {members
                 .filter((m) => m.id !== myId && m.status === "approved")
-                .map((m) => (
-                  <button
-                    key={m.id}
-                    onClick={() => invite(m.id)}
-                    className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm text-neutral-200 hover:bg-neutral-800"
-                  >
-                    <span className="flex h-8 w-8 items-center justify-center rounded-full bg-cyan-600 text-[10px] font-bold text-white">
-                      {m.first_name?.[0]}
-                      {m.last_name?.[0]}
-                    </span>
-                    <span className="flex-1">
-                      {m.first_name} {m.last_name}
-                    </span>
-                    <span className="text-xs font-medium text-cyan-500">Invite</span>
-                  </button>
-                ))}
+                .map((m) => {
+                  const cooldown = getInviteCooldown(m.id);
+                  return (
+                    <button
+                      key={m.id}
+                      onClick={() => invite(m.id)}
+                      disabled={cooldown > 0}
+                      className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm text-neutral-200 hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <span className="flex h-8 w-8 items-center justify-center rounded-full bg-cyan-600 text-[10px] font-bold text-white">
+                        {m.first_name?.[0]}
+                        {m.last_name?.[0]}
+                      </span>
+                      <span className="flex-1">
+                        {m.first_name} {m.last_name}
+                      </span>
+                      <span className={`text-xs font-medium ${cooldown > 0 ? "text-neutral-500" : "text-cyan-500"}`}>
+                        {cooldown > 0 ? `Send (${cooldown}s)` : "Invite"}
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
             </div>
           </div>
