@@ -82,11 +82,11 @@ export default function MeetingRoomPage() {
 
   const createPeer = useCallback(
     (remoteId: string, remoteName: string, initiator: boolean) => {
-      // If peer already exists, close it first (handles reconnection after brief disconnect)
+      // If peer already exists, return it — do NOT close and recreate.
+      // Closing an existing peer destroys in-progress negotiations.
       const existing = peersRef.current[remoteId];
       if (existing) {
-        try { existing.pc.close(); } catch {}
-        delete peersRef.current[remoteId];
+        return existing.pc;
       }
 
       const pc = new RTCPeerConnection(ICE_SERVERS);
@@ -238,8 +238,10 @@ export default function MeetingRoomPage() {
 
       channel
         .on("broadcast", { event: "join" }, ({ payload }) => {
-          // A new peer joined: existing members initiate offers to them
-          if (payload.id !== myId) {
+          // A new peer joined. Only the side with the lexicographically
+          // smaller ID initiates — this prevents "glare" where both sides
+          // send offers simultaneously and destroy each other's peers.
+          if (payload.id !== myId && myId < payload.id) {
             createPeer(payload.id, payload.name, true);
           }
         })
@@ -258,8 +260,8 @@ export default function MeetingRoomPage() {
             const p = peersRef.current[payload.id];
             if (p) {
               p.lastPing = Date.now();
-            } else {
-              // Someone is alive but we don't have a peer — create one
+            } else if (myId < payload.id) {
+              // Only initiate if our ID is smaller (prevents glare)
               createPeer(payload.id, payload.name, true);
             }
           }

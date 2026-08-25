@@ -142,10 +142,10 @@ export default function GuestJoinPage() {
 
   const createPeer = useCallback(
     (remoteId: string, remoteName: string, initiator: boolean) => {
+      // If peer already exists, return it — do NOT close and recreate.
       const existing = peersRef.current[remoteId];
       if (existing) {
-        try { existing.pc.close(); } catch {}
-        delete peersRef.current[remoteId];
+        return existing.pc;
       }
 
       const pc = new RTCPeerConnection(ICE_SERVERS);
@@ -268,7 +268,8 @@ export default function GuestJoinPage() {
 
     channel
       .on("broadcast", { event: "join" }, ({ payload }) => {
-        if (payload.id !== guestId) {
+        // Only the side with the smaller ID initiates (prevents glare)
+        if (payload.id !== guestId && guestId < payload.id) {
           createPeer(payload.id, payload.name, true);
         }
       })
@@ -287,7 +288,7 @@ export default function GuestJoinPage() {
           const p = peersRef.current[payload.id];
           if (p) {
             p.lastPing = Date.now();
-          } else {
+          } else if (guestId < payload.id) {
             createPeer(payload.id, payload.name, true);
           }
         }
