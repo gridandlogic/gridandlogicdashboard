@@ -715,7 +715,7 @@ export default function MeetingRoomPage() {
 
       {/* Video area — Google Meet style */}
       {hasShares && activeShare ? (
-        <div className="flex flex-1 flex-col overflow-hidden p-2 sm:p-3 md:p-4">
+        <div className="flex flex-1 flex-col overflow-hidden p-2 sm:p-3">
           {/* Share tabs (only if more than one share) */}
           {allShares.length > 1 && (
             <div className="mb-2 flex flex-wrap gap-2">
@@ -723,7 +723,7 @@ export default function MeetingRoomPage() {
                 <button
                   key={s.id}
                   onClick={() => setActiveShareId(s.id)}
-                  className={`flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs font-medium transition ${
+                  className={`flex items-center gap-2 rounded-full px-4 py-1.5 text-xs font-medium transition ${
                     activeShare.id === s.id
                       ? "bg-cyan-600 text-white"
                       : "bg-neutral-800 text-neutral-300 hover:bg-neutral-700"
@@ -737,7 +737,7 @@ export default function MeetingRoomPage() {
           )}
 
           {/* Center: large screen share */}
-          <div className="relative flex flex-1 items-center justify-center overflow-hidden rounded-2xl bg-neutral-900">
+          <div className="relative flex flex-1 items-center justify-center overflow-hidden rounded-xl bg-black">
             {activeShare.id === myId ? (
               <video
                 ref={localVideoRef}
@@ -749,62 +749,64 @@ export default function MeetingRoomPage() {
             ) : (
               <ShareVideo stream={activeShare.stream} />
             )}
-            <div className="absolute bottom-3 left-3 flex items-center gap-2 rounded-lg bg-black/60 px-3 py-1.5">
+            <div className="absolute left-3 top-3 flex items-center gap-2 rounded-full bg-black/70 px-3 py-1.5">
               <IconScreenShare className="h-4 w-4 text-cyan-400" />
               <span className="text-xs font-medium text-white">
-                {activeShare.name} is sharing
+                {activeShare.name} is presenting
               </span>
             </div>
           </div>
 
-          {/* Bottom: participant thumbnails */}
-          <div className={`mt-2 grid gap-2 ${thumbCols}`}>
+          {/* Bottom: participant thumbnails — horizontal scroll strip like Google Meet */}
+          <div className="mt-2 flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: "thin" }}>
             {/* Local thumbnail */}
-            <ParticipantThumb
-              videoRef={localVideoRef}
-              camOn={camOn}
-              micOn={micOn}
-              name={`You${sharing ? " · sharing" : ""}`}
-              initials={`${profile.first_name?.[0] ?? ""}${profile.last_name?.[0] ?? ""}`}
-              stream={localStreamRef.current}
-              highlight={sharing}
-            />
+            <div className="shrink-0">
+              <ParticipantThumb
+                videoRef={localVideoRef}
+                camOn={camOn}
+                micOn={micOn}
+                name={`You${sharing ? " · presenting" : ""}`}
+                initials={`${profile.first_name?.[0] ?? ""}${profile.last_name?.[0] ?? ""}`}
+                stream={localStreamRef.current}
+                highlight={sharing}
+              />
+            </div>
             {/* Remote thumbnails */}
             {peerList
               .filter(([id]) => id !== activeShare?.id)
               .map(([id, peer]) => (
-                <RemoteThumb key={id} peer={peer} />
+                <div key={id} className="shrink-0">
+                  <RemoteThumb peer={peer} />
+                </div>
               ))}
           </div>
         </div>
       ) : (
-        /* Grid layout when no screen share */
-        <div className={`grid flex-1 gap-2 overflow-y-auto p-2 sm:gap-3 sm:p-3 md:p-4 ${gridCols}`}>
+        /* Grid layout when no screen share — Google Meet style centered grid */
+        <div className={`grid flex-1 content-center items-center gap-2 overflow-y-auto p-2 sm:gap-3 sm:p-4 md:p-6 ${gridCols}`}>
           {/* Local video tile */}
-          <div className="relative min-h-36 overflow-hidden rounded-2xl bg-neutral-800 sm:min-h-48 md:min-h-56">
-            {camOn ? (
-              <video
-                ref={localVideoRef}
-                autoPlay
-                muted
-                playsInline
-                className="h-full w-full object-cover"
-              />
-            ) : (
-              <div className="flex h-full w-full items-center justify-center">
-                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-cyan-600 text-base font-bold text-white sm:h-16 sm:w-16 sm:text-xl md:h-20 md:w-20">
+          <div className="relative aspect-video min-h-36 overflow-hidden rounded-xl bg-neutral-800 sm:min-h-40 md:min-h-48">
+            <video
+              ref={localVideoRef}
+              autoPlay
+              muted
+              playsInline
+              className={`h-full w-full object-cover ${camOn ? "" : "opacity-0"}`}
+            />
+            {!camOn && (
+              <div className="absolute inset-0 flex h-full w-full items-center justify-center">
+                <div className="flex h-14 w-14 items-center justify-center rounded-full bg-neutral-600 text-lg font-bold text-white sm:h-16 sm:w-16 sm:text-xl md:h-20 md:w-20">
                   {profile.first_name?.[0]}
                   {profile.last_name?.[0]}
                 </div>
               </div>
             )}
-            <div className="absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-black/70 to-transparent sm:h-16" />
-            <div className="absolute bottom-2 left-2 flex items-center gap-1.5 sm:left-3 sm:gap-2">
+            <div className="absolute bottom-2 left-2 flex items-center gap-1.5 rounded-full bg-black/50 px-2.5 py-1 sm:left-3">
               {!micOn && (
-                <IconMicrophoneOff className="h-3 w-3 text-red-400 sm:h-3.5 sm:w-3.5" />
+                <IconMicrophoneOff className="h-3.5 w-3.5 text-red-400" />
               )}
-              <span className="text-[10px] font-medium text-white sm:text-xs">
-                You {sharing && "· sharing"}
+              <span className="text-xs font-medium text-white">
+                You {sharing && "· presenting"}
               </span>
             </div>
           </div>
@@ -817,7 +819,7 @@ export default function MeetingRoomPage() {
       )}
 
       {/* Bottom control bar — Google Meet style */}
-      <div className="flex items-center justify-center gap-1.5 px-2 py-3 sm:gap-2 sm:px-4 sm:py-4 md:gap-3">
+      <div className="flex items-center justify-center gap-2 px-2 py-3 sm:gap-3 sm:px-4 sm:py-4">
         <MeetControlButton
           on={micOn}
           onClick={toggleMic}
@@ -839,6 +841,13 @@ export default function MeetingRoomPage() {
           offIcon={<IconScreenShareOff className="h-5 w-5" />}
           label={sharing ? "Stop sharing" : "Share screen"}
         />
+        <button
+          onClick={() => setShowInvite(true)}
+          className="flex h-10 w-10 items-center justify-center rounded-full bg-neutral-800 text-white transition hover:bg-neutral-700 sm:h-12 sm:w-12 md:h-14 md:w-14"
+          title="Invite"
+        >
+          <IconUserPlus className="h-5 w-5" />
+        </button>
         <div className="mx-1 h-8 w-px bg-neutral-700 sm:mx-2" />
         {meeting?.created_by === myId ? (
           <>
@@ -1033,7 +1042,7 @@ function RemoteVideo({ peer }: { peer: PeerInfo }) {
     .toUpperCase();
 
   return (
-    <div className="relative min-h-36 overflow-hidden rounded-2xl bg-neutral-800 sm:min-h-48 md:min-h-56">
+    <div className="relative aspect-video min-h-36 overflow-hidden rounded-xl bg-neutral-800 sm:min-h-40 md:min-h-48">
       <video
         ref={ref}
         autoPlay
@@ -1042,15 +1051,16 @@ function RemoteVideo({ peer }: { peer: PeerInfo }) {
       />
       {!hasVideo && (
         <div className="absolute inset-0 flex h-full w-full items-center justify-center">
-          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-neutral-600 text-base font-bold text-white sm:h-16 sm:w-16 sm:text-xl md:h-20 md:w-20">
+          <div className="flex h-14 w-14 items-center justify-center rounded-full bg-neutral-600 text-lg font-bold text-white sm:h-16 sm:w-16 sm:text-xl md:h-20 md:w-20">
             {initials}
           </div>
         </div>
       )}
-      <div className="absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-black/70 to-transparent sm:h-16" />
-      <span className="absolute bottom-2 left-2 text-[10px] font-medium text-white sm:left-3 sm:text-xs">
-        {peer.name}
-      </span>
+      <div className="absolute bottom-2 left-2 flex items-center gap-1.5 rounded-full bg-black/50 px-2.5 py-1 sm:left-3">
+        <span className="text-xs font-medium text-white">
+          {peer.name}{peer.isSharing ? " · presenting" : ""}
+        </span>
+      </div>
     </div>
   );
 }
@@ -1127,7 +1137,7 @@ function ParticipantThumb({
   }, [stream, videoRef]);
 
   return (
-    <div className={`relative aspect-video min-h-20 overflow-hidden rounded-xl bg-neutral-800 ${highlight ? "ring-2 ring-cyan-500" : ""}`}>
+    <div className={`relative h-24 w-40 overflow-hidden rounded-xl bg-neutral-800 sm:h-28 sm:w-48 ${highlight ? "ring-2 ring-cyan-500" : ""}`}>
       {camOn ? (
         <video
           ref={videoRef}
@@ -1138,15 +1148,14 @@ function ParticipantThumb({
         />
       ) : (
         <div className="flex h-full w-full items-center justify-center">
-          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-cyan-600 text-xs font-bold text-white sm:h-10 sm:w-10 sm:text-sm">
+          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-neutral-600 text-sm font-bold text-white sm:h-12 sm:w-12">
             {initials}
           </div>
         </div>
       )}
-      <div className="absolute inset-x-0 bottom-0 h-6 bg-gradient-to-t from-black/70 to-transparent" />
-      <div className="absolute bottom-1 left-1.5 flex items-center gap-1">
-        {!micOn && <IconMicrophoneOff className="h-2.5 w-2.5 text-red-400" />}
-        <span className="text-[9px] font-medium text-white sm:text-[10px]">{name}</span>
+      <div className="absolute bottom-1.5 left-1.5 flex items-center gap-1 rounded-full bg-black/50 px-2 py-0.5">
+        {!micOn && <IconMicrophoneOff className="h-3 w-3 text-red-400" />}
+        <span className="text-[10px] font-medium text-white sm:text-xs">{name}</span>
       </div>
     </div>
   );
@@ -1188,7 +1197,7 @@ function RemoteThumb({ peer }: { peer: PeerInfo }) {
     .toUpperCase();
 
   return (
-    <div className={`relative aspect-video min-h-20 overflow-hidden rounded-xl bg-neutral-800 ${peer.isSharing ? "ring-2 ring-cyan-500" : ""}`}>
+    <div className={`relative h-24 w-40 overflow-hidden rounded-xl bg-neutral-800 sm:h-28 sm:w-48 ${peer.isSharing ? "ring-2 ring-cyan-500" : ""}`}>
       <video
         ref={ref}
         autoPlay
@@ -1197,15 +1206,16 @@ function RemoteThumb({ peer }: { peer: PeerInfo }) {
       />
       {!hasVideo && (
         <div className="absolute inset-0 flex h-full w-full items-center justify-center">
-          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-neutral-600 text-xs font-bold text-white sm:h-10 sm:w-10 sm:text-sm">
+          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-neutral-600 text-sm font-bold text-white sm:h-12 sm:w-12">
             {initials}
           </div>
         </div>
       )}
-      <div className="absolute inset-x-0 bottom-0 h-6 bg-gradient-to-t from-black/70 to-transparent" />
-      <span className="absolute bottom-1 left-1.5 text-[9px] font-medium text-white sm:text-[10px]">
-        {peer.name}
-      </span>
+      <div className="absolute bottom-1.5 left-1.5 flex items-center gap-1 rounded-full bg-black/50 px-2 py-0.5">
+        <span className="text-[10px] font-medium text-white sm:text-xs">
+          {peer.name}{peer.isSharing ? " · presenting" : ""}
+        </span>
+      </div>
     </div>
   );
 }
