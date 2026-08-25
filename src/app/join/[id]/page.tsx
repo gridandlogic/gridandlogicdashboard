@@ -23,6 +23,21 @@ const ICE_SERVERS: RTCConfiguration = {
     { urls: "stun:stun1.l.google.com:19302" },
     { urls: "stun:stun2.l.google.com:19302" },
     { urls: "stun:stun3.l.google.com:19302" },
+    {
+      urls: "turn:openrelay.metered.ca:80",
+      username: "openrelayproject",
+      credential: "openrelayproject",
+    },
+    {
+      urls: "turn:openrelay.metered.ca:443",
+      username: "openrelayproject",
+      credential: "openrelayproject",
+    },
+    {
+      urls: "turn:openrelay.metered.ca:443?transport=tcp",
+      username: "openrelayproject",
+      credential: "openrelayproject",
+    },
   ],
 };
 
@@ -342,9 +357,16 @@ export default function GuestJoinPage() {
       })
       .subscribe((status) => {
         if (status === "SUBSCRIBED") {
+          // Send join immediately
           channel.send({
             type: "broadcast",
             event: "join",
+            payload: { id: guestId, name: guestName, isGuest: true },
+          });
+          // Also send a ping immediately so late-joining peers discover us
+          channel.send({
+            type: "broadcast",
+            event: "ping",
             payload: { id: guestId, name: guestName, isGuest: true },
           });
           setJoined(true);
@@ -450,7 +472,8 @@ export default function GuestJoinPage() {
   };
 
   const leaveMeeting = () => {
-    router.push("/");
+    // Show meeting ended screen instead of redirecting to login
+    setMeetingEnded(true);
   };
 
   // --- Landing screen: enter name ---

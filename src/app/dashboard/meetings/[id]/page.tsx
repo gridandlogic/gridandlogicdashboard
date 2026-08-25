@@ -26,6 +26,21 @@ const ICE_SERVERS: RTCConfiguration = {
     { urls: "stun:stun1.l.google.com:19302" },
     { urls: "stun:stun2.l.google.com:19302" },
     { urls: "stun:stun3.l.google.com:19302" },
+    {
+      urls: "turn:openrelay.metered.ca:80",
+      username: "openrelayproject",
+      credential: "openrelayproject",
+    },
+    {
+      urls: "turn:openrelay.metered.ca:443",
+      username: "openrelayproject",
+      credential: "openrelayproject",
+    },
+    {
+      urls: "turn:openrelay.metered.ca:443?transport=tcp",
+      username: "openrelayproject",
+      credential: "openrelayproject",
+    },
   ],
 };
 
@@ -320,9 +335,19 @@ export default function MeetingRoomPage() {
         })
         .subscribe((status) => {
           if (status === "SUBSCRIBED") {
+            // Send join immediately
             channel.send({
               type: "broadcast",
               event: "join",
+              payload: {
+                id: myId,
+                name: `${profile.first_name} ${profile.last_name}`,
+              },
+            });
+            // Also send a ping immediately so late-joining peers discover us
+            channel.send({
+              type: "broadcast",
+              event: "ping",
               payload: {
                 id: myId,
                 name: `${profile.first_name} ${profile.last_name}`,
