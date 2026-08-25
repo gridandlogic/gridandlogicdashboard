@@ -157,11 +157,13 @@ export default function GuestJoinPage() {
 
   const createPeer = useCallback(
     (remoteId: string, remoteName: string, initiator: boolean) => {
-      // If peer already exists, return it — do NOT close and recreate.
       const existing = peersRef.current[remoteId];
       if (existing) {
+        console.log(`[Guest WebRTC] Peer ${remoteId} already exists, returning existing`);
         return existing.pc;
       }
+
+      console.log(`[Guest WebRTC] Creating peer ${remoteId} as ${initiator ? "initiator" : "receiver"}`);
 
       const pc = new RTCPeerConnection(ICE_SERVERS);
       const remoteStream = new MediaStream();
@@ -172,8 +174,10 @@ export default function GuestJoinPage() {
       if (initiator) {
         pc.onnegotiationneeded = async () => {
           try {
+            console.log(`[Guest WebRTC] Negotiation needed for ${remoteId}, creating offer...`);
             const offer = await pc.createOffer();
             await pc.setLocalDescription(offer);
+            console.log(`[Guest WebRTC] Sending offer to ${remoteId}`);
             signalChannelRef.current?.send({
               type: "broadcast",
               event: "signal",
@@ -196,6 +200,7 @@ export default function GuestJoinPage() {
       });
 
       pc.ontrack = (e) => {
+        console.log(`[Guest WebRTC] ontrack fired for ${remoteId}, streams:`, e.streams?.length, "track:", e.track?.kind);
         if (e.streams && e.streams[0]) {
           const oldPeer = peersRef.current[remoteId];
           peersRef.current[remoteId] = {
@@ -229,16 +234,20 @@ export default function GuestJoinPage() {
               data: e.candidate,
             },
           });
+        } else {
+          console.log(`[Guest WebRTC] ICE gathering complete for ${remoteId}`);
         }
       };
 
       pc.onconnectionstatechange = () => {
+        console.log(`[Guest WebRTC] Connection state for ${remoteId}: ${pc.connectionState}`);
         if (pc.connectionState === "failed") {
           pc.restartIce();
         }
       };
 
       pc.oniceconnectionstatechange = () => {
+        console.log(`[Guest WebRTC] ICE connection state for ${remoteId}: ${pc.iceConnectionState}`);
         if (pc.iceConnectionState === "failed") {
           pc.restartIce();
         }
@@ -283,7 +292,7 @@ export default function GuestJoinPage() {
 
     channel
       .on("broadcast", { event: "join" }, ({ payload }) => {
-        // Only the side with the smaller ID initiates (prevents glare)
+        console.log(`[Guest Signal] Received join from ${payload.id}, guestId=${guestId}, shouldInitiate=${guestId < payload.id}`);
         if (payload.id !== guestId && guestId < payload.id) {
           createPeer(payload.id, payload.name, true);
         }
@@ -304,6 +313,7 @@ export default function GuestJoinPage() {
           if (p) {
             p.lastPing = Date.now();
           } else if (guestId < payload.id) {
+            console.log(`[Guest Signal] Discovered new peer via ping: ${payload.id}`);
             createPeer(payload.id, payload.name, true);
           }
         }
@@ -311,6 +321,7 @@ export default function GuestJoinPage() {
       .on("broadcast", { event: "signal" }, async ({ payload }) => {
         if (payload.to !== guestId) return;
         const { from, fromName, kind, data } = payload;
+        console.log(`[Guest Signal] Received ${kind} from ${from}`);
 
         if (kind === "offer") {
           const pc = createPeer(from, fromName ?? "Peer", false);
@@ -356,6 +367,7 @@ export default function GuestJoinPage() {
         }
       })
       .subscribe((status) => {
+        console.log(`[Guest Signal] Channel subscription status: ${status}`);
         if (status === "SUBSCRIBED") {
           // Send join immediately
           channel.send({

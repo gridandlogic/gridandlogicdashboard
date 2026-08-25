@@ -98,11 +98,13 @@ export default function MeetingRoomPage() {
   const createPeer = useCallback(
     (remoteId: string, remoteName: string, initiator: boolean) => {
       // If peer already exists, return it — do NOT close and recreate.
-      // Closing an existing peer destroys in-progress negotiations.
       const existing = peersRef.current[remoteId];
       if (existing) {
+        console.log(`[WebRTC] Peer ${remoteId} already exists, returning existing`);
         return existing.pc;
       }
+
+      console.log(`[WebRTC] Creating peer ${remoteId} as ${initiator ? "initiator" : "receiver"}`);
 
       const pc = new RTCPeerConnection(ICE_SERVERS);
       const remoteStream = new MediaStream();
@@ -115,8 +117,10 @@ export default function MeetingRoomPage() {
       if (initiator) {
         pc.onnegotiationneeded = async () => {
           try {
+            console.log(`[WebRTC] Negotiation needed for ${remoteId}, creating offer...`);
             const offer = await pc.createOffer();
             await pc.setLocalDescription(offer);
+            console.log(`[WebRTC] Sending offer to ${remoteId}`);
             signalChannelRef.current?.send({
               type: "broadcast",
               event: "signal",
@@ -143,6 +147,7 @@ export default function MeetingRoomPage() {
       // proper MediaStream from the browser. Fall back to adding e.track to
       // our manually created stream for browsers where e.streams[0] is undefined.
       pc.ontrack = (e) => {
+        console.log(`[WebRTC] ontrack fired for ${remoteId}, streams:`, e.streams?.length, "track:", e.track?.kind);
         if (e.streams && e.streams[0]) {
           // Create a NEW peer object with the browser-provided stream so
           // React detects the change and RemoteVideo re-renders.
@@ -178,6 +183,8 @@ export default function MeetingRoomPage() {
               data: e.candidate,
             },
           });
+        } else {
+          console.log(`[WebRTC] ICE gathering complete for ${remoteId}`);
         }
       };
 
@@ -185,12 +192,14 @@ export default function MeetingRoomPage() {
       // broadcast or heartbeat timeout. This prevents auto-kicking when mobile
       // browsers suspend the page or on brief network blips.
       pc.onconnectionstatechange = () => {
+        console.log(`[WebRTC] Connection state for ${remoteId}: ${pc.connectionState}`);
         if (pc.connectionState === "failed") {
           pc.restartIce();
         }
       };
 
       pc.oniceconnectionstatechange = () => {
+        console.log(`[WebRTC] ICE connection state for ${remoteId}: ${pc.iceConnectionState}`);
         if (pc.iceConnectionState === "failed") {
           pc.restartIce();
         }
@@ -253,9 +262,7 @@ export default function MeetingRoomPage() {
 
       channel
         .on("broadcast", { event: "join" }, ({ payload }) => {
-          // A new peer joined. Only the side with the lexicographically
-          // smaller ID initiates — this prevents "glare" where both sides
-          // send offers simultaneously and destroy each other's peers.
+          console.log(`[Signal] Received join from ${payload.id}, myId=${myId}, shouldInitiate=${myId < payload.id}`);
           if (payload.id !== myId && myId < payload.id) {
             createPeer(payload.id, payload.name, true);
           }
@@ -276,7 +283,7 @@ export default function MeetingRoomPage() {
             if (p) {
               p.lastPing = Date.now();
             } else if (myId < payload.id) {
-              // Only initiate if our ID is smaller (prevents glare)
+              console.log(`[Signal] Discovered new peer via ping: ${payload.id}`);
               createPeer(payload.id, payload.name, true);
             }
           }
@@ -284,6 +291,7 @@ export default function MeetingRoomPage() {
         .on("broadcast", { event: "signal" }, async ({ payload }) => {
           if (payload.to !== myId) return;
           const { from, fromName, kind, data } = payload;
+          console.log(`[Signal] Received ${kind} from ${from}`);
 
           if (kind === "offer") {
             const pc = createPeer(from, fromName ?? "Peer", false);
@@ -296,6 +304,7 @@ export default function MeetingRoomPage() {
             pendingIceRef.current[from] = [];
             const answer = await pc.createAnswer();
             await pc.setLocalDescription(answer);
+            console.log(`[Signal] Sending answer to ${from}`);
             channel.send({
               type: "broadcast",
               event: "signal",
@@ -334,6 +343,7 @@ export default function MeetingRoomPage() {
           }
         })
         .subscribe((status) => {
+          console.log(`[Signal] Channel subscription status: ${status}`);
           if (status === "SUBSCRIBED") {
             // Send join immediately
             channel.send({
