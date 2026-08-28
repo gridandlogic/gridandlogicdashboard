@@ -8,13 +8,13 @@ import {
   IconHash,
   IconMessageCircle,
   IconVideo,
-  IconBell,
   IconShieldCog,
   IconArrowLeft,
 } from "@tabler/icons-react";
 import { motion } from "motion/react";
 import { cn } from "@/lib/utils";
 import { AppProvider, useApp } from "@/components/providers/app-provider";
+import { MeetingCallNotification } from "@/components/meeting/meeting-call-notification";
 
 export default function DashboardLayout({
   children,
@@ -29,7 +29,7 @@ export default function DashboardLayout({
 }
 
 function Shell({ children }: { children: React.ReactNode }) {
-  const { profile, isAdmin, unreadCount, supabase } = useApp();
+  const { profile, isAdmin, supabase } = useApp();
   const router = useRouter();
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
@@ -59,12 +59,6 @@ function Shell({ children }: { children: React.ReactNode }) {
       label: "Meetings",
       href: "/dashboard/meetings",
       icon: <IconVideo className="h-5 w-5 shrink-0 text-neutral-700 dark:text-neutral-200" />,
-    },
-    {
-      label: "Notifications",
-      href: "/dashboard/notifications",
-      icon: <IconBell className="h-5 w-5 shrink-0 text-neutral-700 dark:text-neutral-200" />,
-      badge: unreadCount,
     },
     ...(isAdmin
       ? [
@@ -134,6 +128,7 @@ function Shell({ children }: { children: React.ReactNode }) {
           {children}
         </div>
       </div>
+      <MeetingCallNotification />
     </div>
   );
 }

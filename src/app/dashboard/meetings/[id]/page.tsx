@@ -583,13 +583,27 @@ export default function MeetingRoomPage() {
       { meeting_id: meetingId, user_id: userId, invited: true },
       { onConflict: "meeting_id,user_id" }
     );
+
+    // Insert notification for the user
     await supabase.from("notifications").insert({
       user_id: userId,
       type: "meeting_invite",
-      title: "📞 Meeting invitation",
-      body: `${profile.first_name} invited you to "${meeting?.title}"`,
+      title: "📹 Meeting Call",
+      body: `${profile.first_name} ${profile.last_name} is calling you to join "${meeting?.title}"`,
       link: `/dashboard/meetings/${meetingId}`,
     });
+
+    // Also trigger push notification via API
+    fetch("/api/push/send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        userId,
+        title: "📹 Meeting Call",
+        body: `${profile.first_name} ${profile.last_name} is calling you to join "${meeting?.title}"`,
+        url: `/dashboard/meetings/${meetingId}`,
+      }),
+    }).catch(() => {});
 
     // Set cooldown
     setInvitedUsers((prev) => ({ ...prev, [userId]: Date.now() }));
@@ -679,30 +693,23 @@ export default function MeetingRoomPage() {
   return (
     <div className="flex flex-1 flex-col overflow-hidden bg-neutral-950">
       {/* Top bar — Google Meet style */}
-      <div className="flex items-center justify-between px-4 py-3">
+      <div className="flex items-center justify-between border-b border-neutral-800 px-4 py-3">
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2">
-            <span className={`h-2.5 w-2.5 rounded-full ${joined ? "bg-red-500 animate-pulse" : "bg-amber-500"}`} />
+            <span className={`h-2.5 w-2.5 rounded-full ${joined ? "bg-green-500 animate-pulse" : "bg-amber-500"}`} />
             <span className="text-sm font-medium text-white">
               {joined ? formatElapsed(elapsed) : "Connecting…"}
             </span>
           </div>
-          <span className="text-neutral-600">|</span>
-          <h1 className="truncate text-sm text-neutral-300">
+          <span className="text-neutral-700">|</span>
+          <h1 className="truncate text-sm font-medium text-neutral-200">
             {meeting?.title ?? "Meeting"}
           </h1>
         </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setShowInvite(true)}
-            className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-neutral-300 hover:bg-neutral-800"
-          >
-            <IconUserPlus className="h-4 w-4" />
-            <span className="hidden sm:inline">Invite</span>
-          </button>
-          <div className="flex items-center gap-1.5 rounded-lg bg-neutral-800/60 px-3 py-2 text-sm text-neutral-300">
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1.5 rounded-full bg-neutral-800 px-3 py-1.5 text-sm text-neutral-300">
             <IconUsers className="h-4 w-4" />
-            {totalParticipants}
+            <span>{totalParticipants}</span>
           </div>
         </div>
       </div>
@@ -737,7 +744,7 @@ export default function MeetingRoomPage() {
           )}
 
           {/* Center: large screen share */}
-          <div className="relative flex flex-1 items-center justify-center overflow-hidden rounded-xl bg-black">
+          <div className="relative flex flex-1 items-center justify-center overflow-hidden rounded-2xl bg-black">
             {activeShare.id === myId ? (
               <video
                 ref={localVideoRef}
@@ -749,16 +756,16 @@ export default function MeetingRoomPage() {
             ) : (
               <ShareVideo stream={activeShare.stream} />
             )}
-            <div className="absolute left-3 top-3 flex items-center gap-2 rounded-full bg-black/70 px-3 py-1.5">
+            <div className="absolute left-4 top-4 flex items-center gap-2 rounded-full bg-black/70 px-4 py-2 backdrop-blur-sm">
               <IconScreenShare className="h-4 w-4 text-cyan-400" />
-              <span className="text-xs font-medium text-white">
+              <span className="text-sm font-medium text-white">
                 {activeShare.name} is presenting
               </span>
             </div>
           </div>
 
           {/* Bottom: participant thumbnails — horizontal scroll strip like Google Meet */}
-          <div className="mt-2 flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: "thin" }}>
+          <div className="mt-3 flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: "thin" }}>
             {/* Local thumbnail */}
             <div className="shrink-0">
               <ParticipantThumb
@@ -783,9 +790,9 @@ export default function MeetingRoomPage() {
         </div>
       ) : (
         /* Grid layout when no screen share — Google Meet style centered grid */
-        <div className={`grid flex-1 content-center items-center gap-2 overflow-y-auto p-2 sm:gap-3 sm:p-4 md:p-6 ${gridCols}`}>
+        <div className={`grid flex-1 content-center items-center gap-3 overflow-y-auto p-3 sm:gap-4 sm:p-6 md:p-8 ${gridCols}`}>
           {/* Local video tile */}
-          <div className="relative aspect-video min-h-36 overflow-hidden rounded-xl bg-neutral-800 sm:min-h-40 md:min-h-48">
+          <div className="relative aspect-video min-h-44 overflow-hidden rounded-2xl bg-neutral-800 shadow-lg sm:min-h-48 md:min-h-56">
             <video
               ref={localVideoRef}
               autoPlay
@@ -794,18 +801,18 @@ export default function MeetingRoomPage() {
               className={`h-full w-full object-cover ${camOn ? "" : "opacity-0"}`}
             />
             {!camOn && (
-              <div className="absolute inset-0 flex h-full w-full items-center justify-center">
-                <div className="flex h-14 w-14 items-center justify-center rounded-full bg-neutral-600 text-lg font-bold text-white sm:h-16 sm:w-16 sm:text-xl md:h-20 md:w-20">
+              <div className="absolute inset-0 flex h-full w-full items-center justify-center bg-gradient-to-br from-neutral-700 to-neutral-800">
+                <div className="flex h-16 w-16 items-center justify-center rounded-full bg-cyan-600 text-xl font-bold text-white shadow-lg sm:h-20 sm:w-20 sm:text-2xl md:h-24 md:w-24 md:text-3xl">
                   {profile.first_name?.[0]}
                   {profile.last_name?.[0]}
                 </div>
               </div>
             )}
-            <div className="absolute bottom-2 left-2 flex items-center gap-1.5 rounded-full bg-black/50 px-2.5 py-1 sm:left-3">
+            <div className="absolute bottom-3 left-3 flex items-center gap-1.5 rounded-full bg-black/60 px-3 py-1.5 backdrop-blur-sm">
               {!micOn && (
-                <IconMicrophoneOff className="h-3.5 w-3.5 text-red-400" />
+                <IconMicrophoneOff className="h-4 w-4 text-red-400" />
               )}
-              <span className="text-xs font-medium text-white">
+              <span className="text-sm font-medium text-white">
                 You {sharing && "· presenting"}
               </span>
             </div>
@@ -819,32 +826,32 @@ export default function MeetingRoomPage() {
       )}
 
       {/* Bottom control bar — Google Meet style */}
-      <div className="flex items-center justify-center gap-2 px-2 py-3 sm:gap-3 sm:px-4 sm:py-4">
+      <div className="flex items-center justify-center gap-2 border-t border-neutral-800 bg-neutral-950 px-3 py-4 sm:gap-3 sm:px-4">
         <MeetControlButton
           on={micOn}
           onClick={toggleMic}
           onIcon={<IconMicrophone className="h-5 w-5" />}
           offIcon={<IconMicrophoneOff className="h-5 w-5" />}
-          label={micOn ? "Mute" : "Unmute"}
+          label={micOn ? "Turn off microphone" : "Turn on microphone"}
         />
         <MeetControlButton
           on={camOn}
           onClick={toggleCam}
           onIcon={<IconVideo className="h-5 w-5" />}
           offIcon={<IconVideoOff className="h-5 w-5" />}
-          label={camOn ? "Camera off" : "Camera on"}
+          label={camOn ? "Turn off camera" : "Turn on camera"}
         />
         <MeetControlButton
           on={!sharing}
           onClick={toggleScreenShare}
           onIcon={<IconScreenShare className="h-5 w-5" />}
           offIcon={<IconScreenShareOff className="h-5 w-5" />}
-          label={sharing ? "Stop sharing" : "Share screen"}
+          label={sharing ? "Stop presenting" : "Present now"}
         />
         <button
           onClick={() => setShowInvite(true)}
-          className="flex h-10 w-10 items-center justify-center rounded-full bg-neutral-800 text-white transition hover:bg-neutral-700 sm:h-12 sm:w-12 md:h-14 md:w-14"
-          title="Invite"
+          className="flex h-12 w-12 items-center justify-center rounded-full bg-neutral-800 text-white transition hover:bg-neutral-700 sm:h-14 sm:w-14"
+          title="Add people"
         >
           <IconUserPlus className="h-5 w-5" />
         </button>
@@ -853,28 +860,28 @@ export default function MeetingRoomPage() {
           <>
             <button
               onClick={() => leaveMeeting(false)}
-              className="flex items-center gap-2 rounded-full bg-neutral-800 px-4 py-3 text-white transition hover:bg-neutral-700 sm:px-5"
+              className="flex items-center gap-2 rounded-full bg-amber-500 px-5 py-3 text-black transition hover:bg-amber-400"
               title="Leave meeting"
             >
               <IconPhoneOff className="h-5 w-5" />
-              <span className="hidden text-sm font-medium sm:inline">Leave</span>
+              <span className="hidden text-sm font-semibold sm:inline">Leave</span>
             </button>
             <button
               onClick={() => setShowEndConfirm(true)}
-              className="flex items-center gap-2 rounded-full bg-red-600 px-4 py-3 text-white transition hover:bg-red-500 sm:px-5"
+              className="flex items-center gap-2 rounded-full bg-red-600 px-5 py-3 text-white transition hover:bg-red-500"
               title="End meeting for all"
             >
-              <span className="text-sm font-medium">End all</span>
+              <span className="text-sm font-semibold">End call</span>
             </button>
           </>
         ) : (
           <button
             onClick={() => leaveMeeting(false)}
-            className="flex items-center gap-2 rounded-full bg-red-600 px-4 py-3 text-white transition hover:bg-red-500 sm:px-5"
+            className="flex items-center gap-2 rounded-full bg-red-600 px-5 py-3 text-white transition hover:bg-red-500"
             title="Leave meeting"
           >
             <IconPhoneOff className="h-5 w-5" />
-            <span className="hidden text-sm font-medium sm:inline">Leave</span>
+            <span className="hidden text-sm font-semibold sm:inline">Leave</span>
           </button>
         )}
       </div>
@@ -1042,7 +1049,7 @@ function RemoteVideo({ peer }: { peer: PeerInfo }) {
     .toUpperCase();
 
   return (
-    <div className="relative aspect-video min-h-36 overflow-hidden rounded-xl bg-neutral-800 sm:min-h-40 md:min-h-48">
+    <div className="relative aspect-video min-h-44 overflow-hidden rounded-2xl bg-neutral-800 shadow-lg sm:min-h-48 md:min-h-56">
       <video
         ref={ref}
         autoPlay
@@ -1050,14 +1057,14 @@ function RemoteVideo({ peer }: { peer: PeerInfo }) {
         className={`h-full w-full object-cover ${hasVideo ? "" : "opacity-0"}`}
       />
       {!hasVideo && (
-        <div className="absolute inset-0 flex h-full w-full items-center justify-center">
-          <div className="flex h-14 w-14 items-center justify-center rounded-full bg-neutral-600 text-lg font-bold text-white sm:h-16 sm:w-16 sm:text-xl md:h-20 md:w-20">
+        <div className="absolute inset-0 flex h-full w-full items-center justify-center bg-gradient-to-br from-neutral-700 to-neutral-800">
+          <div className="flex h-16 w-16 items-center justify-center rounded-full bg-cyan-600 text-xl font-bold text-white shadow-lg sm:h-20 sm:w-20 sm:text-2xl md:h-24 md:w-24 md:text-3xl">
             {initials}
           </div>
         </div>
       )}
-      <div className="absolute bottom-2 left-2 flex items-center gap-1.5 rounded-full bg-black/50 px-2.5 py-1 sm:left-3">
-        <span className="text-xs font-medium text-white">
+      <div className="absolute bottom-3 left-3 flex items-center gap-1.5 rounded-full bg-black/60 px-3 py-1.5 backdrop-blur-sm">
+        <span className="text-sm font-medium text-white">
           {peer.name}{peer.isSharing ? " · presenting" : ""}
         </span>
       </div>
@@ -1082,10 +1089,10 @@ function MeetControlButton({
     <button
       onClick={onClick}
       title={label}
-      className={`flex h-10 w-10 items-center justify-center rounded-full transition sm:h-12 sm:w-12 md:h-14 md:w-14 ${
+      className={`flex h-12 w-12 items-center justify-center rounded-full transition sm:h-14 sm:w-14 ${
         on
           ? "bg-neutral-800 text-white hover:bg-neutral-700"
-          : "bg-red-500/20 text-red-400 hover:bg-red-500/30"
+          : "bg-red-500 text-white hover:bg-red-400"
       }`}
     >
       {on ? onIcon : offIcon}
@@ -1137,7 +1144,7 @@ function ParticipantThumb({
   }, [stream, videoRef]);
 
   return (
-    <div className={`relative h-24 w-40 overflow-hidden rounded-xl bg-neutral-800 sm:h-28 sm:w-48 ${highlight ? "ring-2 ring-cyan-500" : ""}`}>
+    <div className={`relative h-28 w-44 overflow-hidden rounded-2xl bg-neutral-800 shadow-lg sm:h-32 sm:w-52 ${highlight ? "ring-2 ring-cyan-500" : ""}`}>
       {camOn ? (
         <video
           ref={videoRef}
@@ -1147,15 +1154,15 @@ function ParticipantThumb({
           className="h-full w-full object-cover"
         />
       ) : (
-        <div className="flex h-full w-full items-center justify-center">
-          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-neutral-600 text-sm font-bold text-white sm:h-12 sm:w-12">
+        <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-neutral-700 to-neutral-800">
+          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-cyan-600 text-base font-bold text-white sm:h-14 sm:w-14 sm:text-lg">
             {initials}
           </div>
         </div>
       )}
-      <div className="absolute bottom-1.5 left-1.5 flex items-center gap-1 rounded-full bg-black/50 px-2 py-0.5">
-        {!micOn && <IconMicrophoneOff className="h-3 w-3 text-red-400" />}
-        <span className="text-[10px] font-medium text-white sm:text-xs">{name}</span>
+      <div className="absolute bottom-2 left-2 flex items-center gap-1 rounded-full bg-black/60 px-2.5 py-1 backdrop-blur-sm">
+        {!micOn && <IconMicrophoneOff className="h-3.5 w-3.5 text-red-400" />}
+        <span className="text-xs font-medium text-white">{name}</span>
       </div>
     </div>
   );
@@ -1197,7 +1204,7 @@ function RemoteThumb({ peer }: { peer: PeerInfo }) {
     .toUpperCase();
 
   return (
-    <div className={`relative h-24 w-40 overflow-hidden rounded-xl bg-neutral-800 sm:h-28 sm:w-48 ${peer.isSharing ? "ring-2 ring-cyan-500" : ""}`}>
+    <div className={`relative h-28 w-44 overflow-hidden rounded-2xl bg-neutral-800 shadow-lg sm:h-32 sm:w-52 ${peer.isSharing ? "ring-2 ring-cyan-500" : ""}`}>
       <video
         ref={ref}
         autoPlay
@@ -1205,14 +1212,14 @@ function RemoteThumb({ peer }: { peer: PeerInfo }) {
         className={`h-full w-full object-cover ${hasVideo ? "" : "opacity-0"}`}
       />
       {!hasVideo && (
-        <div className="absolute inset-0 flex h-full w-full items-center justify-center">
-          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-neutral-600 text-sm font-bold text-white sm:h-12 sm:w-12">
+        <div className="absolute inset-0 flex h-full w-full items-center justify-center bg-gradient-to-br from-neutral-700 to-neutral-800">
+          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-cyan-600 text-base font-bold text-white sm:h-14 sm:w-14 sm:text-lg">
             {initials}
           </div>
         </div>
       )}
-      <div className="absolute bottom-1.5 left-1.5 flex items-center gap-1 rounded-full bg-black/50 px-2 py-0.5">
-        <span className="text-[10px] font-medium text-white sm:text-xs">
+      <div className="absolute bottom-2 left-2 flex items-center gap-1 rounded-full bg-black/60 px-2.5 py-1 backdrop-blur-sm">
+        <span className="text-xs font-medium text-white">
           {peer.name}{peer.isSharing ? " · presenting" : ""}
         </span>
       </div>
