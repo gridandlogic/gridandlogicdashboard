@@ -4,7 +4,7 @@ import "./globals.css";
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://gridlogicdashboard.vercel.app"),
+  metadataBase: new URL("https://gridandlogicdashboard.vercel.app"),
   title: "Grid & Logic",
   description: "Grid & Logic team dashboard — boards, channels, messages and meetings",
   icons: { icon: "/logo.svg" },

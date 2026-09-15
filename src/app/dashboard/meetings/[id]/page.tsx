@@ -792,7 +792,7 @@ export default function MeetingRoomPage() {
 
   const guestLinkBase = typeof window !== "undefined"
     ? `${window.location.origin}/join/${meetingId}`
-    : `https://gridlogicdashboard.vercel.app/join/${meetingId}`;
+    : `https://gridandlogicdashboard.vercel.app/join/${meetingId}`;
 
   const copyGuestLink = async () => {
     const link = `${guestLinkBase}?t=${Date.now()}`;

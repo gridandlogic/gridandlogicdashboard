@@ -24,7 +24,7 @@ export async function POST(req: NextRequest) {
     }
 
     webpush.setVapidDetails(
-      "mailto:noreply@gridlogicdashboard.vercel.app",
+      "mailto:noreply@gridandlogicdashboard.vercel.app",
       vapidPublicKey,
       vapidPrivateKey
     );
