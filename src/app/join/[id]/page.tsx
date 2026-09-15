@@ -15,6 +15,10 @@ import {
   IconUsers,
   IconCopy,
   IconCheck,
+  IconSettings,
+  IconChevronDown,
+  IconCamera,
+  IconVolume,
 } from "@tabler/icons-react";
 
 const ICE_SERVERS: RTCConfiguration = {
@@ -71,6 +75,13 @@ export default function GuestJoinPage() {
   const [mediaError, setMediaError] = useState<string | null>(null);
   const [elapsed, setElapsed] = useState(0);
   const [activeShareId, setActiveShareId] = useState<string | null>(null);
+
+  // Device selection state
+  const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
+  const [selectedVideoId, setSelectedVideoId] = useState<string>("");
+  const [selectedAudioId, setSelectedAudioId] = useState<string>("");
+  const [selectedOutputId, setSelectedOutputId] = useState<string>("");
+  const [showDeviceMenu, setShowDeviceMenu] = useState(false);
 
   const localStreamRef = useRef<MediaStream | null>(null);
   const screenStreamRef = useRef<MediaStream | null>(null);

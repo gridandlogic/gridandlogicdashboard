@@ -1,119 +1,83 @@
 "use client";
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { useApp } from "@/components/providers/app-provider";
-import type { Notification } from "@/lib/types";
+import { useCallNotification } from "@/hooks/useCallNotification";
 import {
   IconVideo,
   IconPhone,
   IconX,
   IconUser,
+  IconBell,
 } from "@tabler/icons-react";
 
-interface MeetingCall {
-  id: string;
-  meetingId: string;
-  title: string;
-  callerName: string;
-  createdAt: Date;
-}
-
 export function MeetingCallNotification() {
-  const { supabase, profile } = useApp();
   const router = useRouter();
-  const [activeCall, setActiveCall] = useState<MeetingCall | null>(null);
-  const [isVisible, setIsVisible] = useState(false);
+  const { activeCall, isVisible, handleJoin, handleDismiss } = useCallNotification();
 
-  const handleMeetingInvite = useCallback((notification: Notification) => {
-    if (notification.type !== "meeting_invite") return;
-
-    const call: MeetingCall = {
-      id: notification.id,
-      meetingId: notification.link?.split("/").pop() || "",
-      title: notification.body?.match(/"([^"]+)"/)?.[1] || "Meeting",
-      callerName: notification.body?.split(" invited you")[0] || "Someone",
-      createdAt: new Date(notification.created_at),
-    };
-
-    setActiveCall(call);
-    setIsVisible(true);
-
-    // Play ringtone sound
-    playRingtone();
-
-    // Auto-dismiss after 30 seconds
-    setTimeout(() => {
-      setIsVisible(false);
-      setTimeout(() => setActiveCall(null), 300);
-    }, 30000);
-  }, []);
-
+  // Prevent body scroll when call notification is visible
   useEffect(() => {
-    // Listen for new meeting notifications
-    const channel = supabase
-      .channel(`meeting-calls-${profile.id}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "notifications",
-          filter: `user_id=eq.${profile.id}`,
-        },
-        (payload) => {
-          const notification = payload.new as Notification;
-          if (notification.type === "meeting_invite") {
-            handleMeetingInvite(notification);
-          }
+    if (isVisible) {
+      document.body.style.overflow = "hidden";
+      // Request fullscreen on mobile for more immersive experience
+      if (typeof document.documentElement.requestFullscreen === "function") {
+        // Only request fullscreen on mobile-like screens
+        if (window.innerWidth < 768) {
+          document.documentElement.requestFullscreen().catch(() => {});
         }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [supabase, profile.id, handleMeetingInvite]);
-
-  const handleJoin = () => {
-    if (activeCall) {
-      router.push(`/dashboard/meetings/${activeCall.meetingId}`);
+      }
+    } else {
+      document.body.style.overflow = "";
+      if (document.fullscreenElement) {
+        document.exitFullscreen().catch(() => {});
+      }
     }
-    setIsVisible(false);
-    setTimeout(() => setActiveCall(null), 300);
-  };
-
-  const handleDismiss = () => {
-    setIsVisible(false);
-    setTimeout(() => setActiveCall(null), 300);
-  };
+    return () => {
+      document.body.style.overflow = "";
+    };
+  }, [isVisible]);
 
   if (!activeCall) return null;
 
   return (
     <div
-      className={`fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm transition-all duration-300 ${
+      className={`fixed inset-0 z-[100] flex items-center justify-center bg-black/90 backdrop-blur-sm transition-all duration-300 ${
         isVisible ? "opacity-100" : "opacity-0 pointer-events-none"
       }`}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Incoming meeting call"
     >
+      {/* Background pulse animation */}
       <div
-        className={`relative w-full max-w-sm transform rounded-3xl bg-gradient-to-b from-neutral-800 to-neutral-900 p-8 text-center shadow-2xl transition-all duration-300 ${
+        className="absolute inset-0 bg-gradient-to-br from-cyan-500/20 via-transparent to-blue-600/20 animate-pulse"
+        aria-hidden="true"
+      />
+
+      <div
+        className={`relative w-full max-w-sm mx-4 transform rounded-3xl bg-gradient-to-b from-neutral-900 to-neutral-950 p-8 text-center shadow-2xl border border-neutral-800 transition-all duration-300 ${
           isVisible ? "scale-100 translate-y-0" : "scale-95 translate-y-4"
         }`}
       >
-        {/* Close button */}
+        {/* Close button - only show on desktop or as secondary action */}
         <button
           onClick={handleDismiss}
-          className="absolute right-4 top-4 rounded-full p-2 text-neutral-400 transition hover:bg-neutral-700 hover:text-white"
+          className="absolute right-4 top-4 rounded-full p-2 text-neutral-400 transition hover:bg-neutral-800 hover:text-white focus:outline-none focus:ring-2 focus:ring-cyan-500"
+          aria-label="Dismiss call"
         >
           <IconX className="h-5 w-5" />
         </button>
 
-        {/* Animated caller avatar */}
-        <div className="relative mx-auto mb-6">
+        {/* Animated caller avatar with pulsing rings */}
+        <div className="relative mx-auto mb-6" aria-hidden="true">
           <div className="absolute inset-0 animate-ping rounded-full bg-cyan-500/30" />
           <div className="absolute inset-2 animate-pulse rounded-full bg-cyan-500/20" />
-          <div className="relative flex h-24 w-24 items-center justify-center rounded-full bg-gradient-to-br from-cyan-500 to-blue-600 text-3xl font-bold text-white shadow-lg">
-            {activeCall.callerName.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase()}
+          <div className="relative flex h-24 w-24 items-center justify-center rounded-full bg-gradient-to-br from-cyan-500 to-blue-600 text-3xl font-bold text-white shadow-lg shadow-cyan-500/30">
+            {activeCall.callerName
+              .split(" ")
+              .map((n) => n[0])
+              .join("")
+              .slice(0, 2)
+              .toUpperCase()}
           </div>
         </div>
 
@@ -124,61 +88,85 @@ export function MeetingCallNotification() {
         <p className="mt-1 text-sm text-neutral-400">is inviting you to a meeting</p>
 
         {/* Meeting title */}
-        <div className="mt-4 rounded-xl bg-neutral-700/50 px-4 py-3">
+        <div className="mt-4 rounded-xl bg-neutral-800/50 px-4 py-3 border border-neutral-700">
           <div className="flex items-center justify-center gap-2 text-cyan-400">
             <IconVideo className="h-4 w-4" />
-            <span className="text-sm font-medium">{activeCall.title}</span>
+            <span className="text-sm font-medium truncate max-w-[200px]">
+              {activeCall.title}
+            </span>
           </div>
         </div>
 
-        {/* Action buttons */}
-        <div className="mt-8 flex items-center justify-center gap-4">
+        {/* Time since call started */}
+        <p className="mt-3 text-xs text-neutral-500">
+          Ringing for{" "}
+          <span id="call-duration" className="font-mono">
+            0s
+          </span>
+        </p>
+
+        {/* Action buttons - Google Meet style */}
+        <div className="mt-8 flex items-center justify-center gap-6">
           <button
             onClick={handleDismiss}
-            className="flex h-14 w-14 items-center justify-center rounded-full bg-red-500/20 text-red-400 transition hover:bg-red-500/30"
+            className="group relative flex h-16 w-16 items-center justify-center rounded-full bg-red-500/20 text-red-400 transition hover:bg-red-500/30 hover:scale-105 focus:outline-none focus:ring-2 focus:ring-red-500"
             title="Decline"
+            aria-label="Decline call"
           >
-            <IconX className="h-6 w-6" />
+            <IconX className="h-7 w-7" />
+            <span className="absolute -bottom-7 left-1/2 -translate-x-1/2 text-xs text-neutral-500 whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity">
+              Decline
+            </span>
           </button>
+
           <button
             onClick={handleJoin}
-            className="flex h-16 w-16 items-center justify-center rounded-full bg-green-500 text-white shadow-lg shadow-green-500/30 transition hover:bg-green-400"
+            className="group relative flex h-18 w-18 items-center justify-center rounded-full bg-green-500 text-white shadow-lg shadow-green-500/40 transition hover:bg-green-400 hover:scale-105 focus:outline-none focus:ring-2 focus:ring-green-500"
             title="Join meeting"
+            aria-label="Join meeting"
           >
-            <IconVideo className="h-7 w-7" />
+            <IconVideo className="h-8 w-8" />
+            <span className="absolute -bottom-7 left-1/2 -translate-x-1/2 text-xs text-neutral-500 whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity">
+              Join
+            </span>
           </button>
         </div>
 
-        <p className="mt-4 text-xs text-neutral-500">Tap to join or dismiss</p>
+        {/* Swipe hint for mobile */}
+        <div className="mt-6 flex items-center justify-center gap-2 text-xs text-neutral-500">
+          <IconBell className="h-3.5 w-3.5 animate-bounce text-cyan-400" />
+          <span>Swipe up to answer • Swipe down to decline</span>
+        </div>
+
+        {/* Keyboard hint */}
+        <p className="mt-2 text-xs text-neutral-600 hidden sm:block">
+          Press <kbd className="px-1.5 py-0.5 rounded bg-neutral-800 text-neutral-300 font-mono">Enter</kbd> to join, <kbd className="px-1.5 py-0.5 rounded bg-neutral-800 text-neutral-300 font-mono">Esc</kbd> to decline
+        </p>
       </div>
     </div>
   );
 }
 
-function playRingtone() {
-  // Create a simple ringtone using Web Audio API
-  try {
-    const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
-    const oscillator = audioContext.createOscillator();
-    const gainNode = audioContext.createGain();
+// Keyboard handling for call notification
+export function useCallKeyboardShortcuts(
+  isVisible: boolean,
+  onJoin: () => void,
+  onDismiss: () => void
+) {
+  useEffect(() => {
+    if (!isVisible) return;
 
-    oscillator.connect(gainNode);
-    gainNode.connect(audioContext.destination);
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        onJoin();
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        onDismiss();
+      }
+    };
 
-    oscillator.frequency.value = 800;
-    oscillator.type = "sine";
-    gainNode.gain.value = 0.1;
-
-    // Ring pattern
-    const now = audioContext.currentTime;
-    gainNode.gain.setValueAtTime(0.1, now);
-    gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.5);
-    gainNode.gain.setValueAtTime(0.1, now + 1);
-    gainNode.gain.exponentialRampToValueAtTime(0.01, now + 1.5);
-
-    oscillator.start(now);
-    oscillator.stop(now + 2);
-  } catch {
-    // Audio not supported
-  }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isVisible, onJoin, onDismiss]);
 }

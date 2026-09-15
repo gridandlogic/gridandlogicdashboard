@@ -1,5 +1,7 @@
 # Grid & Logic Dashboard
 
+**Live App:** [https://gridlogicdashboard.vercel.app](https://gridlogicdashboard.vercel.app)
+
 Team dashboard for Grid & Logic: sprint boards, channels, direct messages, meetings (mic/camera/screen share), file & voice messages, push notifications, and admin-controlled access.
 
 ## Stack
