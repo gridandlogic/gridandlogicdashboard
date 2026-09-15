@@ -735,7 +735,18 @@ export default function GuestJoinPage() {
           <div className="relative flex flex-1 items-center justify-center overflow-hidden rounded-xl bg-black">
             {activeShare.id === guestId ? (
               <video
-                ref={localVideoRef}
+                ref={(el) => {
+                  localVideoRef.current = el;
+                  if (el && screenStreamRef.current) {
+                    const screenTrack = screenStreamRef.current.getVideoTracks()[0];
+                    if (screenTrack && !(el.srcObject as MediaStream)?.getVideoTracks().includes(screenTrack)) {
+                      el.srcObject = new MediaStream([
+                        screenTrack,
+                        ...(localStreamRef.current?.getAudioTracks() ?? [])
+                      ]);
+                    }
+                  }
+                }}
                 autoPlay
                 muted
                 playsInline
@@ -780,7 +791,12 @@ export default function GuestJoinPage() {
           {/* Local video tile */}
           <div className="relative aspect-video min-h-36 overflow-hidden rounded-xl bg-neutral-800 sm:min-h-40 md:min-h-48">
             <video
-              ref={localVideoRef}
+              ref={(el) => {
+                localVideoRef.current = el;
+                if (el && localStreamRef.current && el.srcObject !== localStreamRef.current) {
+                  el.srcObject = localStreamRef.current;
+                }
+              }}
               autoPlay
               muted
               playsInline
@@ -966,17 +982,18 @@ function GuestParticipantThumb({
   stream: MediaStream | null;
   highlight?: boolean;
 }) {
-  useEffect(() => {
-    const video = videoRef.current;
-    if (!video || !stream) return;
-    if (video.srcObject !== stream) video.srcObject = stream;
-  }, [stream, videoRef]);
-
   return (
     <div className={`relative h-24 w-40 overflow-hidden rounded-xl bg-neutral-800 sm:h-28 sm:w-48 ${highlight ? "ring-2 ring-cyan-500" : ""}`}>
       {camOn ? (
         <video
-          ref={videoRef}
+          ref={(el) => {
+            if (videoRef && 'current' in videoRef) {
+              (videoRef as React.MutableRefObject<HTMLVideoElement | null>).current = el;
+            }
+            if (el && stream && el.srcObject !== stream) {
+              el.srcObject = stream;
+            }
+          }}
           autoPlay
           muted
           playsInline

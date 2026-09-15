@@ -923,7 +923,18 @@ export default function MeetingRoomPage() {
               <div className="relative flex flex-1 items-center justify-center overflow-hidden rounded-2xl bg-black">
                 {activeShare.id === myId ? (
                   <video
-                    ref={localVideoRef}
+                    ref={(el) => {
+                      localVideoRef.current = el;
+                      if (el && screenStreamRef.current) {
+                        const screenTrack = screenStreamRef.current.getVideoTracks()[0];
+                        if (screenTrack && !(el.srcObject as MediaStream)?.getVideoTracks().includes(screenTrack)) {
+                          el.srcObject = new MediaStream([
+                            screenTrack,
+                            ...(localStreamRef.current?.getAudioTracks() ?? [])
+                          ]);
+                        }
+                      }
+                    }}
                     autoPlay
                     muted
                     playsInline
@@ -977,7 +988,12 @@ export default function MeetingRoomPage() {
                 {pinnedId === myId ? (
                   <div className="relative h-full w-full">
                     <video
-                      ref={localVideoRef}
+                      ref={(el) => {
+                        localVideoRef.current = el;
+                        if (el && localStreamRef.current && el.srcObject !== localStreamRef.current) {
+                          el.srcObject = localStreamRef.current;
+                        }
+                      }}
                       autoPlay
                       muted
                       playsInline
@@ -1046,7 +1062,12 @@ export default function MeetingRoomPage() {
                 isLocalSpeaking ? "ring-4 ring-green-500 shadow-green-500/20" : ""
               }`}>
                 <video
-                  ref={localVideoRef}
+                  ref={(el) => {
+                    localVideoRef.current = el;
+                    if (el && localStreamRef.current && el.srcObject !== localStreamRef.current) {
+                      el.srcObject = localStreamRef.current;
+                    }
+                  }}
                   autoPlay
                   muted
                   playsInline
@@ -1667,19 +1688,20 @@ function ParticipantThumb({
   isPinned?: boolean;
   onPin?: () => void;
 }) {
-  useEffect(() => {
-    const video = videoRef.current;
-    if (!video || !stream) return;
-    if (video.srcObject !== stream) video.srcObject = stream;
-  }, [stream, videoRef]);
-
   return (
     <div className={`relative h-28 w-44 overflow-hidden rounded-2xl bg-neutral-800 shadow-lg sm:h-32 sm:w-52 transition-all duration-300 ${
       highlight ? "ring-2 ring-cyan-500" : isSpeaking ? "ring-4 ring-green-500" : ""
     }`}>
       {camOn ? (
         <video
-          ref={videoRef}
+          ref={(el) => {
+            if (videoRef && 'current' in videoRef) {
+              (videoRef as React.MutableRefObject<HTMLVideoElement | null>).current = el;
+            }
+            if (el && stream && el.srcObject !== stream) {
+              el.srcObject = stream;
+            }
+          }}
           autoPlay
           muted
           playsInline
