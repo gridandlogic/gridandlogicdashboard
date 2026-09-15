@@ -167,6 +167,12 @@ export default function MeetingRoomPage() {
   const pendingIceRef = useRef<Record<string, RTCIceCandidate[]>>({});
   const cleanupRef = useRef<(() => void) | null>(null);
   const chatBottomRef = useRef<HTMLDivElement>(null);
+  // Canvas PiP compositor refs
+  const compositeCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const compositeAnimFrameRef = useRef<number | null>(null);
+  const compositeStreamRef = useRef<MediaStream | null>(null);
+  const screenVideoElRef = useRef<HTMLVideoElement | null>(null);
+  const camVideoElRef = useRef<HTMLVideoElement | null>(null);
 
   const myId = profile.id;
   const myName = `${profile.first_name} ${profile.last_name}`;
@@ -644,10 +650,116 @@ export default function MeetingRoomPage() {
     }
   };
 
+  /** Start canvas compositor: draws screenStream full-size + camStream PiP bottom-right */
+  const startCompositing = (screenStream: MediaStream, camStream: MediaStream): MediaStreamTrack => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 1280;
+    canvas.height = 720;
+    compositeCanvasRef.current = canvas;
+
+    const screenVid = document.createElement("video");
+    screenVid.srcObject = screenStream;
+    screenVid.autoplay = true;
+    screenVid.playsInline = true;
+    screenVid.muted = true;
+    screenVideoElRef.current = screenVid;
+
+    const camVid = document.createElement("video");
+    camVid.srcObject = camStream;
+    camVid.autoplay = true;
+    camVid.playsInline = true;
+    camVid.muted = true;
+    camVideoElRef.current = camVid;
+
+    const ctx = canvas.getContext("2d")!;
+
+    const draw = () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      // Draw full screen share
+      if (screenVid.readyState >= screenVid.HAVE_CURRENT_DATA) {
+        ctx.drawImage(screenVid, 0, 0, canvas.width, canvas.height);
+      } else {
+        ctx.fillStyle = "#111";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+      }
+      // Draw camera PiP in bottom-right corner
+      if (camVid.readyState >= camVid.HAVE_CURRENT_DATA) {
+        const pipW = 240;
+        const pipH = 135;
+        const margin = 16;
+        const x = canvas.width - pipW - margin;
+        const y = canvas.height - pipH - margin;
+        // Rounded clip
+        ctx.save();
+        ctx.beginPath();
+        const r = 12;
+        ctx.moveTo(x + r, y);
+        ctx.lineTo(x + pipW - r, y);
+        ctx.quadraticCurveTo(x + pipW, y, x + pipW, y + r);
+        ctx.lineTo(x + pipW, y + pipH - r);
+        ctx.quadraticCurveTo(x + pipW, y + pipH, x + pipW - r, y + pipH);
+        ctx.lineTo(x + r, y + pipH);
+        ctx.quadraticCurveTo(x, y + pipH, x, y + pipH - r);
+        ctx.lineTo(x, y + r);
+        ctx.quadraticCurveTo(x, y, x + r, y);
+        ctx.closePath();
+        ctx.clip();
+        ctx.drawImage(camVid, x, y, pipW, pipH);
+        ctx.restore();
+        // Border
+        ctx.strokeStyle = "rgba(0,212,200,0.8)";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(x + r, y);
+        ctx.lineTo(x + pipW - r, y);
+        ctx.quadraticCurveTo(x + pipW, y, x + pipW, y + r);
+        ctx.lineTo(x + pipW, y + pipH - r);
+        ctx.quadraticCurveTo(x + pipW, y + pipH, x + pipW - r, y + pipH);
+        ctx.lineTo(x + r, y + pipH);
+        ctx.quadraticCurveTo(x, y + pipH, x, y + pipH - r);
+        ctx.lineTo(x, y + r);
+        ctx.quadraticCurveTo(x, y, x + r, y);
+        ctx.closePath();
+        ctx.stroke();
+      }
+      compositeAnimFrameRef.current = requestAnimationFrame(draw);
+    };
+
+    screenVid.play().catch(() => {});
+    camVid.play().catch(() => {});
+    draw();
+
+    const canvasStream = canvas.captureStream(30);
+    compositeStreamRef.current = canvasStream;
+    return canvasStream.getVideoTracks()[0];
+  };
+
+  /** Stop canvas compositor and clean up resources */
+  const stopCompositing = () => {
+    if (compositeAnimFrameRef.current !== null) {
+      cancelAnimationFrame(compositeAnimFrameRef.current);
+      compositeAnimFrameRef.current = null;
+    }
+    compositeStreamRef.current?.getTracks().forEach((t) => t.stop());
+    compositeStreamRef.current = null;
+    if (screenVideoElRef.current) {
+      screenVideoElRef.current.srcObject = null;
+      screenVideoElRef.current = null;
+    }
+    if (camVideoElRef.current) {
+      camVideoElRef.current.srcObject = null;
+      camVideoElRef.current = null;
+    }
+    compositeCanvasRef.current = null;
+  };
+
   const toggleScreenShare = async () => {
     if (sharing) {
+      // Stop screen capture
       screenStreamRef.current?.getTracks().forEach((t) => t.stop());
       screenStreamRef.current = null;
+      stopCompositing();
+      // Restore real camera track to all peers and local preview
       const camTrack = localStreamRef.current?.getVideoTracks()[0];
       if (camTrack) await replaceVideoTrack(camTrack);
       setSharing(false);
@@ -658,10 +770,17 @@ export default function MeetingRoomPage() {
       });
     } else {
       try {
-        const screen = await navigator.mediaDevices.getDisplayMedia({ video: true });
+        const screen = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 } });
         screenStreamRef.current = screen;
-        const screenTrack = screen.getVideoTracks()[0];
-        screenTrack.onended = async () => {
+
+        // Build composite track (screen + camera PiP)
+        const camStream = localStreamRef.current ?? new MediaStream();
+        const compositeTrack = startCompositing(screen, camStream);
+
+        screen.getVideoTracks()[0].onended = async () => {
+          stopCompositing();
+          screenStreamRef.current?.getTracks().forEach((t) => t.stop());
+          screenStreamRef.current = null;
           const camTrack = localStreamRef.current?.getVideoTracks()[0];
           if (camTrack) await replaceVideoTrack(camTrack);
           setSharing(false);
@@ -671,7 +790,21 @@ export default function MeetingRoomPage() {
             payload: { id: myId },
           });
         };
-        await replaceVideoTrack(screenTrack);
+
+        // Replace track in all peer connections with composite
+        Object.values(peersRef.current).forEach((p) => {
+          const sender = p.pc.getSenders().find((s) => s.track?.kind === "video");
+          if (sender) sender.replaceTrack(compositeTrack);
+        });
+
+        // Local preview: show the actual screen share (not the composite)
+        if (localVideoRef.current) {
+          localVideoRef.current.srcObject = new MediaStream([
+            screen.getVideoTracks()[0],
+            ...(localStreamRef.current?.getAudioTracks() ?? []),
+          ]);
+        }
+
         setSharing(true);
         signalChannelRef.current?.send({
           type: "broadcast",
@@ -1513,19 +1646,30 @@ function RemoteVideo({
         video.srcObject = peer.stream;
       }
       const tracks = peer.stream.getVideoTracks();
-      const hasVid = tracks.length > 0 && tracks.some((t) => t.enabled && t.readyState === "live");
+      const hasVid = tracks.length > 0 && tracks.some((t) => t.enabled && t.readyState === "live" && !t.muted);
       setHasVideo(hasVid);
     };
 
     updateStream();
-    const interval = setInterval(updateStream, 500);
+    const interval = setInterval(updateStream, 1000);
     peer.stream.addEventListener("addtrack", updateStream);
     peer.stream.addEventListener("removetrack", updateStream);
+
+    // Instant response to mute/unmute (camera on/off)
+    const videoTracks = peer.stream.getVideoTracks();
+    videoTracks.forEach((t) => {
+      t.onmute = () => setHasVideo(false);
+      t.onunmute = () => setHasVideo(true);
+    });
 
     return () => {
       clearInterval(interval);
       peer.stream.removeEventListener("addtrack", updateStream);
       peer.stream.removeEventListener("removetrack", updateStream);
+      peer.stream.getVideoTracks().forEach((t) => {
+        t.onmute = null;
+        t.onunmute = null;
+      });
     };
   }, [peer.stream]);
 
@@ -1755,18 +1899,28 @@ function RemoteThumb({
         video.srcObject = peer.stream;
       }
       const tracks = peer.stream.getVideoTracks();
-      setHasVideo(tracks.length > 0 && tracks.some((t) => t.enabled && t.readyState === "live"));
+      setHasVideo(tracks.length > 0 && tracks.some((t) => t.enabled && t.readyState === "live" && !t.muted));
     };
 
     updateStream();
-    const interval = setInterval(updateStream, 500);
+    const interval = setInterval(updateStream, 1000);
     peer.stream.addEventListener("addtrack", updateStream);
     peer.stream.addEventListener("removetrack", updateStream);
+
+    // Instant response to mute/unmute (camera on/off)
+    peer.stream.getVideoTracks().forEach((t) => {
+      t.onmute = () => setHasVideo(false);
+      t.onunmute = () => setHasVideo(true);
+    });
 
     return () => {
       clearInterval(interval);
       peer.stream.removeEventListener("addtrack", updateStream);
       peer.stream.removeEventListener("removetrack", updateStream);
+      peer.stream.getVideoTracks().forEach((t) => {
+        t.onmute = null;
+        t.onunmute = null;
+      });
     };
   }, [peer.stream]);
 

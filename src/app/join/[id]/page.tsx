@@ -66,6 +66,12 @@ export default function GuestJoinPage() {
   const [notFound, setNotFound] = useState(false);
   const [linkExpired, setLinkExpired] = useState(false);
 
+  // Pre-join camera preview
+  const [previewStream, setPreviewStream] = useState<MediaStream | null>(null);
+  const [previewCamOn, setPreviewCamOn] = useState(true);
+  const [previewMicOn, setPreviewMicOn] = useState(true);
+  const previewVideoRef = useRef<HTMLVideoElement>(null);
+
   // WebRTC state
   const [micOn, setMicOn] = useState(true);
   const [camOn, setCamOn] = useState(true);
@@ -91,6 +97,12 @@ export default function GuestJoinPage() {
   const pendingIceRef = useRef<Record<string, RTCIceCandidate[]>>({});
   const cleanupRef = useRef<(() => void) | null>(null);
   const hasJoinedRef = useRef(false);
+  // Canvas PiP compositor refs
+  const compositeCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const compositeAnimFrameRef = useRef<number | null>(null);
+  const compositeStreamRef = useRef<MediaStream | null>(null);
+  const screenVideoElRef = useRef<HTMLVideoElement | null>(null);
+  const camVideoElRef = useRef<HTMLVideoElement | null>(null);
 
   const guestId = useRef(`guest-${Math.random().toString(36).slice(2, 11)}`).current;
 
@@ -153,6 +165,26 @@ export default function GuestJoinPage() {
   const updatePeers = useCallback(() => {
     setPeers({ ...peersRef.current });
   }, []);
+
+  // Pre-join camera preview — start camera early so user sees themselves before clicking Join
+  useEffect(() => {
+    if (entered) return;
+    let stream: MediaStream | null = null;
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: true })
+      .then((s) => {
+        stream = s;
+        setPreviewStream(s);
+        if (previewVideoRef.current) previewVideoRef.current.srcObject = s;
+      })
+      .catch(() => {
+        setPreviewCamOn(false);
+      });
+    return () => {
+      stream?.getTracks().forEach((t) => t.stop());
+      setPreviewStream(null);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entered]);
 
   useEffect(() => {
     if (!joined) return;
@@ -497,10 +529,95 @@ export default function GuestJoinPage() {
     }
   };
 
+  const startCompositing = (screenStream: MediaStream, camStream: MediaStream): MediaStreamTrack => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 1280;
+    canvas.height = 720;
+    compositeCanvasRef.current = canvas;
+
+    const screenVid = document.createElement("video");
+    screenVid.srcObject = screenStream;
+    screenVid.autoplay = true;
+    screenVid.playsInline = true;
+    screenVid.muted = true;
+    screenVideoElRef.current = screenVid;
+
+    const camVid = document.createElement("video");
+    camVid.srcObject = camStream;
+    camVid.autoplay = true;
+    camVid.playsInline = true;
+    camVid.muted = true;
+    camVideoElRef.current = camVid;
+
+    const ctx = canvas.getContext("2d")!;
+    const draw = () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      if (screenVid.readyState >= screenVid.HAVE_CURRENT_DATA) {
+        ctx.drawImage(screenVid, 0, 0, canvas.width, canvas.height);
+      } else {
+        ctx.fillStyle = "#111";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+      }
+      if (camVid.readyState >= camVid.HAVE_CURRENT_DATA) {
+        const pipW = 240, pipH = 135, margin = 16;
+        const x = canvas.width - pipW - margin;
+        const y = canvas.height - pipH - margin;
+        const r = 12;
+        ctx.save();
+        ctx.beginPath();
+        ctx.moveTo(x + r, y); ctx.lineTo(x + pipW - r, y);
+        ctx.quadraticCurveTo(x + pipW, y, x + pipW, y + r);
+        ctx.lineTo(x + pipW, y + pipH - r);
+        ctx.quadraticCurveTo(x + pipW, y + pipH, x + pipW - r, y + pipH);
+        ctx.lineTo(x + r, y + pipH);
+        ctx.quadraticCurveTo(x, y + pipH, x, y + pipH - r);
+        ctx.lineTo(x, y + r);
+        ctx.quadraticCurveTo(x, y, x + r, y);
+        ctx.closePath();
+        ctx.clip();
+        ctx.drawImage(camVid, x, y, pipW, pipH);
+        ctx.restore();
+        ctx.strokeStyle = "rgba(0,212,200,0.8)";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(x + r, y); ctx.lineTo(x + pipW - r, y);
+        ctx.quadraticCurveTo(x + pipW, y, x + pipW, y + r);
+        ctx.lineTo(x + pipW, y + pipH - r);
+        ctx.quadraticCurveTo(x + pipW, y + pipH, x + pipW - r, y + pipH);
+        ctx.lineTo(x + r, y + pipH);
+        ctx.quadraticCurveTo(x, y + pipH, x, y + pipH - r);
+        ctx.lineTo(x, y + r);
+        ctx.quadraticCurveTo(x, y, x + r, y);
+        ctx.closePath();
+        ctx.stroke();
+      }
+      compositeAnimFrameRef.current = requestAnimationFrame(draw);
+    };
+    screenVid.play().catch(() => {});
+    camVid.play().catch(() => {});
+    draw();
+    const canvasStream = canvas.captureStream(30);
+    compositeStreamRef.current = canvasStream;
+    return canvasStream.getVideoTracks()[0];
+  };
+
+  const stopCompositing = () => {
+    if (compositeAnimFrameRef.current !== null) {
+      cancelAnimationFrame(compositeAnimFrameRef.current);
+      compositeAnimFrameRef.current = null;
+    }
+    compositeStreamRef.current?.getTracks().forEach((t) => t.stop());
+    compositeStreamRef.current = null;
+    if (screenVideoElRef.current) { screenVideoElRef.current.srcObject = null; screenVideoElRef.current = null; }
+    if (camVideoElRef.current) { camVideoElRef.current.srcObject = null; camVideoElRef.current = null; }
+    compositeCanvasRef.current = null;
+  };
+
   const toggleScreenShare = async () => {
     if (sharing) {
       screenStreamRef.current?.getTracks().forEach((t) => t.stop());
       screenStreamRef.current = null;
+      stopCompositing();
       const camTrack = localStreamRef.current?.getVideoTracks()[0];
       if (camTrack) await replaceVideoTrack(camTrack);
       setSharing(false);
@@ -511,10 +628,15 @@ export default function GuestJoinPage() {
       });
     } else {
       try {
-        const screen = await navigator.mediaDevices.getDisplayMedia({ video: true });
+        const screen = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 } });
         screenStreamRef.current = screen;
-        const screenTrack = screen.getVideoTracks()[0];
-        screenTrack.onended = async () => {
+        const camStream = localStreamRef.current ?? new MediaStream();
+        const compositeTrack = startCompositing(screen, camStream);
+
+        screen.getVideoTracks()[0].onended = async () => {
+          stopCompositing();
+          screenStreamRef.current?.getTracks().forEach((t) => t.stop());
+          screenStreamRef.current = null;
           const camTrack = localStreamRef.current?.getVideoTracks()[0];
           if (camTrack) await replaceVideoTrack(camTrack);
           setSharing(false);
@@ -524,7 +646,19 @@ export default function GuestJoinPage() {
             payload: { id: guestId },
           });
         };
-        await replaceVideoTrack(screenTrack);
+
+        Object.values(peersRef.current).forEach((p) => {
+          const sender = p.pc.getSenders().find((s) => s.track?.kind === "video");
+          if (sender) sender.replaceTrack(compositeTrack);
+        });
+
+        if (localVideoRef.current) {
+          localVideoRef.current.srcObject = new MediaStream([
+            screen.getVideoTracks()[0],
+            ...(localStreamRef.current?.getAudioTracks() ?? []),
+          ]);
+        }
+
         setSharing(true);
         signalChannelRef.current?.send({
           type: "broadcast",
@@ -591,20 +725,113 @@ export default function GuestJoinPage() {
   }
 
   if (!entered) {
+    const togglePreviewCam = () => {
+      if (!previewStream) return;
+      previewStream.getVideoTracks().forEach((t) => { t.enabled = !t.enabled; });
+      setPreviewCamOn((v) => !v);
+    };
+    const togglePreviewMic = () => {
+      if (!previewStream) return;
+      previewStream.getAudioTracks().forEach((t) => { t.enabled = !t.enabled; });
+      setPreviewMicOn((v) => !v);
+    };
+
     return (
-      <div className="flex min-h-screen items-center justify-center bg-neutral-950 px-4">
-        <div className="w-full max-w-sm rounded-2xl border border-neutral-800 bg-neutral-900 p-6">
-          <div className="flex items-center gap-3">
-            <img src="/logo.svg" alt="Grid & Logic" className="h-10 w-10 rounded-full" />
-            <div>
-              <h2 className="text-lg font-bold text-white">Join Meeting</h2>
-              {meeting && (
-                <p className="text-xs text-neutral-500">{meeting.title}</p>
-              )}
-            </div>
+      <div className="flex min-h-screen flex-col bg-neutral-950 md:flex-row">
+        {/* Left hero panel */}
+        <div className="relative flex flex-col items-center justify-center overflow-hidden bg-gradient-to-br from-neutral-900 via-cyan-950/30 to-neutral-900 px-8 py-12 md:w-1/2 md:min-h-screen">
+          {/* Background decorative rings */}
+          <div className="pointer-events-none absolute inset-0 overflow-hidden">
+            <div className="absolute -left-24 -top-24 h-72 w-72 rounded-full border border-cyan-500/10" />
+            <div className="absolute -left-12 -top-12 h-48 w-48 rounded-full border border-cyan-500/10" />
+            <div className="absolute -right-16 bottom-16 h-56 w-56 rounded-full border border-cyan-500/10" />
           </div>
 
-          <div className="mt-6 space-y-4">
+          <div className="relative flex flex-col items-center text-center">
+            <img src="/logo.svg" alt="Grid & Logic" className="mb-6 h-16 w-16 rounded-2xl shadow-lg shadow-cyan-500/20" />
+            <h1 className="text-2xl font-bold text-white sm:text-3xl">Grid &amp; Logic</h1>
+            <p className="mt-1 text-sm font-medium text-cyan-400">Professional Video Meetings</p>
+
+            {meeting && (
+              <div className="mt-8 w-full max-w-xs rounded-2xl border border-neutral-700/60 bg-neutral-800/50 p-5 backdrop-blur-sm">
+                <p className="text-[10px] font-semibold uppercase tracking-widest text-neutral-500">You&apos;re joining</p>
+                <p className="mt-1 text-lg font-semibold text-white">{meeting.title}</p>
+                <div className="mt-3 flex items-center justify-center gap-2">
+                  <span className="flex h-2 w-2 rounded-full bg-green-500 animate-pulse" />
+                  <span className="text-xs text-green-400">Meeting is live</span>
+                </div>
+              </div>
+            )}
+
+            <div className="mt-8 flex items-center gap-2 rounded-full border border-cyan-500/30 bg-cyan-500/10 px-4 py-2">
+              <svg className="h-3.5 w-3.5 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+              </svg>
+              <span className="text-xs font-medium text-cyan-300">Guest Access</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Right panel — camera preview + join form */}
+        <div className="flex flex-1 flex-col items-center justify-center gap-6 px-6 py-10 md:w-1/2">
+          {/* Camera preview */}
+          <div className="relative w-full max-w-sm overflow-hidden rounded-2xl bg-neutral-800 shadow-xl" style={{ aspectRatio: "16/9" }}>
+            {previewCamOn && previewStream ? (
+              <video
+                ref={(el) => {
+                  previewVideoRef.current = el;
+                  if (el && previewStream && el.srcObject !== previewStream) el.srcObject = previewStream;
+                }}
+                autoPlay
+                muted
+                playsInline
+                className="h-full w-full object-cover"
+              />
+            ) : (
+              <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-neutral-700 to-neutral-800">
+                <div className="flex h-16 w-16 items-center justify-center rounded-full bg-cyan-600 text-2xl font-bold text-white">
+                  {guestName?.[0]?.toUpperCase() || "?"}
+                </div>
+              </div>
+            )}
+            {/* Cam/Mic toggle buttons overlay */}
+            <div className="absolute bottom-3 left-0 right-0 flex items-center justify-center gap-3">
+              <button
+                onClick={togglePreviewCam}
+                title={previewCamOn ? "Turn off camera" : "Turn on camera"}
+                className={`flex h-10 w-10 items-center justify-center rounded-full shadow-lg transition ${
+                  previewCamOn ? "bg-neutral-700 text-white hover:bg-neutral-600" : "bg-red-500 text-white hover:bg-red-400"
+                }`}
+              >
+                {previewCamOn ? (
+                  <IconVideo className="h-5 w-5" />
+                ) : (
+                  <IconVideoOff className="h-5 w-5" />
+                )}
+              </button>
+              <button
+                onClick={togglePreviewMic}
+                title={previewMicOn ? "Turn off microphone" : "Turn on microphone"}
+                className={`flex h-10 w-10 items-center justify-center rounded-full shadow-lg transition ${
+                  previewMicOn ? "bg-neutral-700 text-white hover:bg-neutral-600" : "bg-red-500 text-white hover:bg-red-400"
+                }`}
+              >
+                {previewMicOn ? (
+                  <IconMicrophone className="h-5 w-5" />
+                ) : (
+                  <IconMicrophoneOff className="h-5 w-5" />
+                )}
+              </button>
+            </div>
+            {!previewStream && (
+              <div className="absolute inset-0 flex items-center justify-center">
+                <p className="text-xs text-neutral-500">Camera unavailable</p>
+              </div>
+            )}
+          </div>
+
+          {/* Join form */}
+          <div className="w-full max-w-sm space-y-4">
             <div>
               <label className="mb-1.5 block text-xs font-medium text-neutral-400">
                 Your name
@@ -614,23 +841,30 @@ export default function GuestJoinPage() {
                 value={guestName}
                 onChange={(e) => setGuestName(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && joinMeeting()}
-                placeholder="Enter your name"
+                placeholder="Enter your full name"
                 autoFocus
-                className="w-full rounded-lg border border-neutral-700 bg-neutral-800 px-4 py-3 text-sm text-white outline-none focus:border-cyan-500"
+                className="w-full rounded-xl border border-neutral-700 bg-neutral-800/80 px-4 py-3 text-sm text-white outline-none transition focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/30"
               />
             </div>
             <button
-              onClick={joinMeeting}
+              onClick={() => {
+                // Carry preview cam/mic state into the meeting
+                setMicOn(previewMicOn);
+                setCamOn(previewCamOn);
+                joinMeeting();
+              }}
               disabled={!guestName.trim()}
-              className="flex w-full items-center justify-center gap-2 rounded-lg bg-cyan-600 py-3 text-sm font-medium text-white transition hover:bg-cyan-500 disabled:opacity-40"
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-cyan-600 py-3.5 text-sm font-semibold text-white shadow-lg shadow-cyan-600/20 transition hover:bg-cyan-500 disabled:opacity-40"
             >
               <IconVideo className="h-4 w-4" />
               Join Meeting
             </button>
           </div>
 
-          <p className="mt-4 text-center text-[10px] text-neutral-600">
+          <p className="text-center text-[10px] text-neutral-600">
             By joining, you agree to allow camera and microphone access.
+            <br />
+            Your session is encrypted and private.
           </p>
         </div>
       </div>
@@ -1027,18 +1261,25 @@ function GuestRemoteThumb({ peer }: { peer: PeerInfo }) {
         video.srcObject = peer.stream;
       }
       const tracks = peer.stream.getVideoTracks();
-      setHasVideo(tracks.length > 0 && tracks.some((t) => t.enabled && t.readyState === "live"));
+      setHasVideo(tracks.length > 0 && tracks.some((t) => t.enabled && t.readyState === "live" && !t.muted));
     };
 
     updateStream();
-    const interval = setInterval(updateStream, 500);
+    const interval = setInterval(updateStream, 1000);
     peer.stream.addEventListener("addtrack", updateStream);
     peer.stream.addEventListener("removetrack", updateStream);
+
+    // Instant cam-off detection
+    peer.stream.getVideoTracks().forEach((t) => {
+      t.onmute = () => setHasVideo(false);
+      t.onunmute = () => setHasVideo(true);
+    });
 
     return () => {
       clearInterval(interval);
       peer.stream.removeEventListener("addtrack", updateStream);
       peer.stream.removeEventListener("removetrack", updateStream);
+      peer.stream.getVideoTracks().forEach((t) => { t.onmute = null; t.onunmute = null; });
     };
   }, [peer.stream]);
 
