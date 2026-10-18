@@ -8,6 +8,7 @@ export const AVAILABLE_TAGS = [
   "Content Writer",
   "Sales Executive",
   "Senior Sales Executive",
+    "Team Lead",
 ] as const;
 
 export const MAX_TAGS = 5;
