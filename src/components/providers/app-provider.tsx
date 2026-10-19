@@ -196,15 +196,24 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const sendTestPushNotification = useCallback(async () => {
     const userId = profileRef.current?.id;
     if (!userId) throw new Error("Your profile is not ready. Refresh the dashboard and try again.");
-    const { error } = await supabase.from("notifications").insert({
-      user_id: userId,
-      type: "push_test",
-      title: "Grid & Logic test alert",
-      body: "This alert was sent through the same Supabase trigger as messages and meeting calls.",
-      link: "/dashboard/profile",
+    const response = await fetch("/api/push/send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        userId,
+        title: "Grid & Logic test alert",
+        body: "This is a direct test of push delivery to this account's registered devices.",
+        url: "/dashboard/profile",
+        kind: "push_test",
+      }),
     });
-    if (error) throw new Error(`Could not create a Supabase test alert: ${error.message}`);
-  }, [supabase]);
+    const result = await response.json().catch(() => null);
+    if (!response.ok) throw new Error(result?.error || `Push test failed (${response.status}).`);
+    if (!result?.sent) {
+      if (result?.failed) throw new Error(`Push service rejected delivery to ${result.failed} device(s). Check the VAPID keys and server logs.`);
+      throw new Error("No active push subscription is saved for this account. Enable alerts again on this device.");
+    }
+  }, []);
 
   const markAllRead = useCallback(async () => {
     if (!profileRef.current) return;
@@ -293,7 +302,7 @@ export function PushNotificationsPrompt() {
     setMessage("");
     try {
       await sendTestPushNotification();
-      setMessage("Test alert queued through Supabase. Check this device's notification tray.");
+      setMessage("Push sent. Check this device's notification tray.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Could not send a test notification.");
     } finally {
