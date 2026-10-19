@@ -196,24 +196,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const sendTestPushNotification = useCallback(async () => {
     const userId = profileRef.current?.id;
     if (!userId) throw new Error("Your profile is not ready. Refresh the dashboard and try again.");
-    const response = await fetch("/api/push/send", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        userId,
-        title: "Grid & Logic test alert",
-        body: "Push notifications are reaching this device.",
-        url: "/dashboard/profile",
-        kind: "test",
-      }),
+    const { error } = await supabase.from("notifications").insert({
+      user_id: userId,
+      type: "push_test",
+      title: "Grid & Logic test alert",
+      body: "This alert was sent through the same Supabase trigger as messages and meeting calls.",
+      link: "/dashboard/profile",
     });
-    const result = await response.json().catch(() => null);
-    if (!response.ok) throw new Error(result?.error || "The test push could not be sent.");
-    if (!result?.sent) {
-      if (result?.failed) throw new Error(`Push service rejected the notification (${result.failed} failed). Check the Vercel function logs.`);
-      throw new Error("No saved push subscription was found for this device. Enable notifications again.");
-    }
-  }, []);
+    if (error) throw new Error(`Could not create a Supabase test alert: ${error.message}`);
+  }, [supabase]);
 
   const markAllRead = useCallback(async () => {
     if (!profileRef.current) return;
@@ -302,7 +293,7 @@ export function PushNotificationsPrompt() {
     setMessage("");
     try {
       await sendTestPushNotification();
-      setMessage("Test sent. Check this device's notifications.");
+      setMessage("Test alert queued through Supabase. Check this device's notification tray.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Could not send a test notification.");
     } finally {

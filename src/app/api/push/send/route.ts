@@ -36,6 +36,7 @@ export async function POST(req: NextRequest) {
     const suppliedSecret = req.headers.get("x-push-webhook-secret");
     const isTrustedWebhook = Boolean(webhookSecret && suppliedSecret === webhookSecret);
     if (suppliedSecret && !isTrustedWebhook) {
+      console.error("Database push webhook rejected: PUSH_WEBHOOK_SECRET is missing or does not match the Supabase Vault secret.");
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
