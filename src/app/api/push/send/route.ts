@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createClient as createServiceClient } from "@supabase/supabase-js";
-import webpush from "web-push";
+import { deliverPush } from "@/lib/push/deliver";
 
 export async function POST(req: NextRequest) {
   try {
@@ -18,19 +18,6 @@ export async function POST(req: NextRequest) {
     if (!userId || !title) {
       return NextResponse.json({ error: "Missing userId or title" }, { status: 400 });
     }
-
-    const vapidPublicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
-    const vapidPrivateKey = process.env.VAPID_PRIVATE_KEY;
-
-    if (!vapidPublicKey || !vapidPrivateKey) {
-      return NextResponse.json({ error: "VAPID keys not configured" }, { status: 500 });
-    }
-
-    webpush.setVapidDetails(
-      "mailto:noreply@gridandlogicdashboard.vercel.app",
-      vapidPublicKey,
-      vapidPrivateKey
-    );
 
     const webhookSecret = process.env.PUSH_WEBHOOK_SECRET;
     const suppliedSecret = req.headers.get("x-push-webhook-secret");
@@ -54,69 +41,14 @@ export async function POST(req: NextRequest) {
       supabase = await createClient();
       const { data: { user }, error: authError } = await supabase.auth.getUser();
       if (authError || !user) {
-        return NextResponse.json({ error: "Sign in before sending a test notification." }, { status: 401 });
+        return NextResponse.json({ error: "Sign in before sending a notification." }, { status: 401 });
       }
       if (user.id !== userId) {
-        return NextResponse.json({ error: "You can only send a test notification to your own devices." }, { status: 403 });
+        return NextResponse.json({ error: "You can only send notifications to your own devices." }, { status: 403 });
       }
     }
-    const { data: subs, error: subscriptionError } = await supabase
-      .from("push_subscriptions")
-      .select("*")
-      .eq("user_id", userId);
-
-    if (subscriptionError) {
-      console.error("Could not read Web Push subscriptions", subscriptionError.message);
-      return NextResponse.json({ error: "Could not read the saved notification settings." }, { status: 500 });
-    }
-
-    if (!subs || subs.length === 0) {
-      return NextResponse.json({ success: true, sent: 0 });
-    }
-
-    const payload = JSON.stringify({
-      title,
-      body: notifBody ?? "",
-      url: url ?? "/dashboard",
-      icon: "/logo.svg",
-      badge: "/logo.svg",
-      kind: kind ?? "message",
-      meetingId,
-    });
-
-    let sent = 0;
-    let failed = 0;
-    for (const sub of subs) {
-      try {
-        await webpush.sendNotification(
-          {
-            endpoint: sub.endpoint,
-            keys: sub.keys,
-          },
-          payload
-        );
-        sent++;
-      } catch (err) {
-        failed++;
-        // If subscription is expired, delete it
-        const status = (err as { statusCode?: number }).statusCode;
-        console.error("Web Push delivery failed", {
-          status,
-          userId,
-          endpointHost: (() => {
-            try { return new URL(sub.endpoint).host; } catch { return "invalid-endpoint"; }
-          })(),
-        });
-        if (status === 404 || status === 410) {
-          await supabase
-            .from("push_subscriptions")
-            .delete()
-            .eq("endpoint", sub.endpoint);
-        }
-      }
-    }
-
-    return NextResponse.json({ success: failed === 0, sent, failed });
+    const result = await deliverPush(supabase, { userId, title, body: notifBody, url, kind, meetingId });
+    return NextResponse.json(result, { status: result.failed && !result.sent ? 502 : 200 });
   } catch {
     return NextResponse.json({ error: "Internal error" }, { status: 500 });
   }

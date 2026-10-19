@@ -1,5 +1,5 @@
 "use client";
-import React, { useEffect, useCallback } from "react";
+import React, { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useCallNotification } from "@/hooks/useCallNotification";
 import {
@@ -14,26 +14,20 @@ export function MeetingCallNotification() {
   const router = useRouter();
   const { activeCall, isVisible, handleJoin, handleDismiss } = useCallNotification();
 
-  // Prevent body scroll when call notification is visible
+  useCallKeyboardShortcuts(isVisible, handleJoin, handleDismiss);
+  const [seconds, setSeconds] = useState(0);
   useEffect(() => {
-    if (isVisible) {
-      document.body.style.overflow = "hidden";
-      // Request fullscreen on mobile for more immersive experience
-      if (typeof document.documentElement.requestFullscreen === "function") {
-        // Only request fullscreen on mobile-like screens
-        if (window.innerWidth < 768) {
-          document.documentElement.requestFullscreen().catch(() => {});
-        }
-      }
-    } else {
-      document.body.style.overflow = "";
-      if (document.fullscreenElement) {
-        document.exitFullscreen().catch(() => {});
-      }
-    }
-    return () => {
-      document.body.style.overflow = "";
-    };
+    if (!activeCall) return;
+    const update = () => setSeconds(Math.max(0, Math.floor((Date.now() - activeCall.createdAt.getTime()) / 1000)));
+    update();
+    const timer = setInterval(update, 1000);
+    return () => clearInterval(timer);
+  }, [activeCall]);
+  useEffect(() => {
+    if (!isVisible) return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = previous; };
   }, [isVisible]);
 
   if (!activeCall) return null;
@@ -101,7 +95,7 @@ export function MeetingCallNotification() {
         <p className="mt-3 text-xs text-neutral-500">
           Ringing for{" "}
           <span id="call-duration" className="font-mono">
-            0s
+            {seconds}s
           </span>
         </p>
 
@@ -135,7 +129,7 @@ export function MeetingCallNotification() {
         {/* Swipe hint for mobile */}
         <div className="mt-6 flex items-center justify-center gap-2 text-xs text-neutral-500">
           <IconBell className="h-3.5 w-3.5 animate-bounce text-cyan-400" />
-          <span>Swipe up to answer • Swipe down to decline</span>
+          <span>Tap the green button to join or the red button to decline</span>
         </div>
 
         {/* Keyboard hint */}

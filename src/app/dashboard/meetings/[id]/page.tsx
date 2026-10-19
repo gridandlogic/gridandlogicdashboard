@@ -899,29 +899,20 @@ export default function MeetingRoomPage() {
     const lastInvite = invitedUsers[userId];
     if (lastInvite && Date.now() - lastInvite < 10000) return;
 
-    const { error: participantError } = await supabase.from("meeting_participants").upsert(
-      { meeting_id: meetingId, user_id: userId, invited: true },
-      { onConflict: "meeting_id,user_id" }
-    );
-    if (participantError) {
-      setMediaError(`Could not invite this teammate: ${participantError.message}`);
-      return;
-    }
-
     setMediaError(null);
-    const { error: notificationError } = await supabase.from("notifications").insert({
-      user_id: userId,
-      type: "meeting_invite",
-      title: "📹 Meeting Call",
-      body: `${profile.first_name} ${profile.last_name} is calling you to join "${meeting?.title}"`,
-      link: `/dashboard/meetings/${meetingId}`,
-    });
-    if (notificationError) {
-      setMediaError(`Could not send the meeting invite: ${notificationError.message}`);
-      return;
+    try {
+      const response = await fetch("/api/push/event", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "meeting_invite", meetingId, userId }),
+      });
+      const result = await response.json();
+      if (result.notificationId) setInvitedUsers((prev) => ({ ...prev, [userId]: Date.now() }));
+      if (!response.ok || !result.sent) {
+        setMediaError(result.error || "The invite was saved, but the device alert could not be delivered.");
+      }
+    } catch {
+      setMediaError("Could not reach the server to send this call. Please try again.");
     }
-
-    setInvitedUsers((prev) => ({ ...prev, [userId]: Date.now() }));
   };
 
   const getInviteCooldown = (userId: string): number => {

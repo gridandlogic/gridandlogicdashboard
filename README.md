@@ -29,7 +29,7 @@ Team dashboard for Grid & Logic: sprint boards, channels, direct messages, meeti
 2. Add the Supabase service role key as `SUPABASE_SERVICE_ROLE_KEY`. Generate a separate random `PUSH_WEBHOOK_SECRET` and set the same value in the app host and the Supabase SQL below.
 3. Run [`supabase/repair-notification-settings.sql`](supabase/repair-notification-settings.sql) in the Supabase SQL Editor. It installs the unique key and update policy needed to save and re-save each device's subscription.
 4. Run [`supabase/push-trigger.sql`](supabase/push-trigger.sql) in the Supabase SQL Editor after replacing its app URL and webhook-secret placeholders. This lets Supabase deliver push alerts when the recipient's dashboard is closed.
-5. Open the dashboard on each phone, install it from the browser's **Add to Home Screen** menu, open the installed app, and tap **Enable** when the dashboard asks to send call and message alerts. iPhone push requires an installed home-screen web app and notification permission. After setup, use **Send test** in the dashboard prompt to verify the device before relying on meeting alerts.
+5. Open the dashboard on each phone, install it from the browser's **Add to Home Screen** menu, open the installed app, and tap **Enable** when prompted to send call and message alerts. iPhone push requires an installed home-screen web app and notification permission. Send a real direct message or meeting invitation to confirm delivery.
 
 Incoming calls ring in the open dashboard and arrive as a high-priority, vibrating push notification while it is in the background. Mobile operating systems control background notification sound; a web app cannot force a custom ringtone while fully closed.
 

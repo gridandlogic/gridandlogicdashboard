@@ -21,6 +21,7 @@ function DMContent() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selected, setSelected] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [deliveryWarning, setDeliveryWarning] = useState("");
 
   const otherOf = useCallback(
     (c: Conversation): Profile | undefined => {
@@ -100,7 +101,7 @@ function DMContent() {
           filter: `conversation_id=eq.${selected.id}`,
         },
         (payload) => {
-          setMessages((prev) => [...prev, payload.new as Message]);
+          setMessages((prev) => [...prev.filter((m) => m.id !== (payload.new as Message).id), payload.new as Message]);
         }
       )
       .subscribe();
@@ -119,12 +120,22 @@ function DMContent() {
     file_type: string | null;
   }) => {
     if (!selected) return;
-    const { error } = await supabase.from("messages").insert({
-      conversation_id: selected.id,
-      sender_id: profile.id,
-      ...payload,
-    });
-    if (error) alert(error.message);
+    setDeliveryWarning("");
+    const { data: message, error } = await supabase.from("messages").insert({
+      conversation_id: selected.id, sender_id: profile.id, ...payload,
+    }).select().single();
+    if (error) { alert(error.message); return; }
+    setMessages((current) => [...current.filter((item) => item.id !== message.id), message as Message]);
+    try {
+      const response = await fetch("/api/push/event", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "dm", messageId: message.id }),
+      });
+      const result = await response.json();
+      if (!response.ok || !result.sent) setDeliveryWarning(result.error || "Message saved, but the device alert could not be sent.");
+    } catch {
+      setDeliveryWarning("Message saved, but its device alert could not be sent.");
+    }
   };
 
   const other = selected ? otherOf(selected) : undefined;
@@ -191,6 +202,7 @@ function DMContent() {
               members={members}
               currentUserId={profile.id}
             />
+            {deliveryWarning && <p role="status" className="px-4 py-2 text-xs text-amber-400">{deliveryWarning}</p>}
             <MessageInput onSend={sendMessage} />
           </>
         ) : (
