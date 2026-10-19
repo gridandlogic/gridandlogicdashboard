@@ -72,6 +72,7 @@ export async function POST(req: NextRequest) {
     });
 
     let sent = 0;
+    let failed = 0;
     for (const sub of subs) {
       try {
         await webpush.sendNotification(
@@ -83,8 +84,16 @@ export async function POST(req: NextRequest) {
         );
         sent++;
       } catch (err) {
+        failed++;
         // If subscription is expired, delete it
         const status = (err as { statusCode?: number }).statusCode;
+        console.error("Web Push delivery failed", {
+          status,
+          userId,
+          endpointHost: (() => {
+            try { return new URL(sub.endpoint).host; } catch { return "invalid-endpoint"; }
+          })(),
+        });
         if (status === 404 || status === 410) {
           await supabase
             .from("push_subscriptions")
@@ -94,7 +103,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    return NextResponse.json({ success: true, sent });
+    return NextResponse.json({ success: failed === 0, sent, failed });
   } catch {
     return NextResponse.json({ error: "Internal error" }, { status: 500 });
   }

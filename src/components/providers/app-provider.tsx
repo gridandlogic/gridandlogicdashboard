@@ -147,8 +147,29 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       atob(decodedVapidKey),
       (character) => character.charCodeAt(0)
     );
-    const subscription = await registration.pushManager.getSubscription() ??
-      await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey });
+    let subscription = await registration.pushManager.getSubscription();
+    const currentApplicationServerKey = subscription?.options.applicationServerKey;
+    const subscriptionKeyMatches = Boolean(
+      currentApplicationServerKey &&
+      currentApplicationServerKey.byteLength === applicationServerKey.byteLength &&
+      new Uint8Array(currentApplicationServerKey).every(
+        (byte, index) => byte === applicationServerKey[index]
+      )
+    );
+
+    // Push subscriptions are bound to the VAPID public key used when created.
+    // Renew stale subscriptions after the VAPID pair changes so future pushes
+    // are sent with a key the browser recognizes.
+    if (subscription && !subscriptionKeyMatches) {
+      await subscription.unsubscribe();
+      subscription = null;
+    }
+    if (!subscription) {
+      subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey,
+      });
+    }
     const p256dh = subscription.getKey("p256dh");
     const auth = subscription.getKey("auth");
     if (!p256dh || !auth) throw new Error("Your browser returned an invalid push subscription.");
