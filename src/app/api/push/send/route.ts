@@ -51,11 +51,23 @@ export async function POST(req: NextRequest) {
       });
     } else {
       supabase = await createClient();
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      if (authError || !user) {
+        return NextResponse.json({ error: "Sign in before sending a test notification." }, { status: 401 });
+      }
+      if (user.id !== userId) {
+        return NextResponse.json({ error: "You can only send a test notification to your own devices." }, { status: 403 });
+      }
     }
-    const { data: subs } = await supabase
+    const { data: subs, error: subscriptionError } = await supabase
       .from("push_subscriptions")
       .select("*")
       .eq("user_id", userId);
+
+    if (subscriptionError) {
+      console.error("Could not read Web Push subscriptions", subscriptionError.message);
+      return NextResponse.json({ error: "Could not read the saved notification settings." }, { status: 500 });
+    }
 
     if (!subs || subs.length === 0) {
       return NextResponse.json({ success: true, sent: 0 });

@@ -23,6 +23,7 @@ type AppContextType = {
   markAllRead: () => Promise<void>;
   refreshMembers: () => Promise<void>;
   enablePushNotifications: () => Promise<void>;
+  sendTestPushNotification: () => Promise<void>;
 };
 
 const AppContext = createContext<AppContextType | null>(null);
@@ -192,6 +193,28 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  const sendTestPushNotification = useCallback(async () => {
+    const userId = profileRef.current?.id;
+    if (!userId) throw new Error("Your profile is not ready. Refresh the dashboard and try again.");
+    const response = await fetch("/api/push/send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        userId,
+        title: "Grid & Logic test alert",
+        body: "Push notifications are reaching this device.",
+        url: "/dashboard/profile",
+        kind: "test",
+      }),
+    });
+    const result = await response.json().catch(() => null);
+    if (!response.ok) throw new Error(result?.error || "The test push could not be sent.");
+    if (!result?.sent) {
+      if (result?.failed) throw new Error(`Push service rejected the notification (${result.failed} failed). Check the Vercel function logs.`);
+      throw new Error("No saved push subscription was found for this device. Enable notifications again.");
+    }
+  }, []);
+
   const markAllRead = useCallback(async () => {
     if (!profileRef.current) return;
     setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
@@ -222,6 +245,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         markAllRead,
         refreshMembers,
         enablePushNotifications,
+        sendTestPushNotification,
       }}
     >
       {children}
@@ -230,7 +254,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 }
 
 export function PushNotificationsPrompt() {
-  const { enablePushNotifications } = useApp();
+  const { enablePushNotifications, sendTestPushNotification } = useApp();
   const pathname = usePathname();
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
@@ -249,11 +273,14 @@ export function PushNotificationsPrompt() {
         if (subscription) await enablePushNotifications();
         setHasSubscription(Boolean(subscription));
       })
-      .catch(() => setHasSubscription(false));
+      .catch((error) => {
+        setHasSubscription(false);
+        setMessage(error instanceof Error ? error.message : "Could not check this device's push subscription.");
+      });
   }, [enablePushNotifications]);
 
   const inMeetingRoom = pathname.startsWith("/dashboard/meetings/") && pathname !== "/dashboard/meetings/";
-  if (typeof window === "undefined" || !("Notification" in window) || window.Notification.permission === "denied" || hasSubscription === true || dismissed || inMeetingRoom) {
+  if (typeof window === "undefined" || !("Notification" in window) || window.Notification.permission === "denied" || dismissed || inMeetingRoom) {
     return null;
   }
 
@@ -270,15 +297,34 @@ export function PushNotificationsPrompt() {
     }
   };
 
+  const test = async () => {
+    setBusy(true);
+    setMessage("");
+    try {
+      await sendTestPushNotification();
+      setMessage("Test sent. Check this device's notifications.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not send a test notification.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <div className="fixed bottom-3 left-3 z-40 flex max-w-[calc(100vw-1.5rem)] items-center gap-3 rounded-xl border border-neutral-700 bg-neutral-900 px-3 py-2.5 shadow-xl sm:bottom-5 sm:left-auto sm:right-5">
       <div className="min-w-0 text-xs text-neutral-300">
-        <p className="font-medium text-white">Get call and message alerts</p>
+        <p className="font-medium text-white">{hasSubscription ? "Push alerts enabled on this device" : "Get call and message alerts"}</p>
         {message && <p className="mt-1 max-w-64 text-amber-300">{message}</p>}
       </div>
-      <button type="button" onClick={enable} disabled={busy} className="shrink-0 rounded-lg bg-cyan-600 px-3 py-2 text-xs font-semibold text-white hover:bg-cyan-500 disabled:opacity-60">
-        {busy ? "Enabling…" : "Enable"}
-      </button>
+      {hasSubscription ? (
+        <button type="button" onClick={test} disabled={busy} className="shrink-0 rounded-lg bg-cyan-600 px-3 py-2 text-xs font-semibold text-white hover:bg-cyan-500 disabled:opacity-60">
+          {busy ? "Sending…" : "Send test"}
+        </button>
+      ) : (
+        <button type="button" onClick={enable} disabled={busy} className="shrink-0 rounded-lg bg-cyan-600 px-3 py-2 text-xs font-semibold text-white hover:bg-cyan-500 disabled:opacity-60">
+          {busy ? "Enabling…" : "Enable"}
+        </button>
+      )}
       <button type="button" onClick={() => setDismissed(true)} aria-label="Dismiss notification prompt" className="shrink-0 rounded-md px-2 py-2 text-neutral-400 hover:bg-neutral-800 hover:text-white">×</button>
     </div>
   );
