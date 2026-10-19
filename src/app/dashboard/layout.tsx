@@ -1,5 +1,5 @@
 "use client";
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { Sidebar, SidebarBody, SidebarLink } from "@/components/ui/sidebar";
 import {
@@ -11,7 +11,6 @@ import {
   IconShieldCog,
   IconArrowLeft,
   IconBell,
-  IconCheck,
 } from "@tabler/icons-react";
 import { motion } from "motion/react";
 import { cn } from "@/lib/utils";
@@ -31,7 +30,7 @@ export default function DashboardLayout({
 }
 
 function Shell({ children }: { children: React.ReactNode }) {
-  const { profile, isAdmin, supabase } = useApp();
+  const { profile, isAdmin, supabase, unreadCount } = useApp();
   const router = useRouter();
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
@@ -56,6 +55,12 @@ function Shell({ children }: { children: React.ReactNode }) {
       label: "Messages",
       href: "/dashboard/dm",
       icon: <IconMessageCircle className="h-5 w-5 shrink-0 text-neutral-700 dark:text-neutral-200" />,
+    },
+    {
+      label: "Notifications",
+      href: "/dashboard/notifications",
+      icon: <IconBell className="h-5 w-5 shrink-0 text-neutral-700 dark:text-neutral-200" />,
+      badge: unreadCount,
     },
     {
       label: "Meetings",
@@ -130,86 +135,12 @@ function Shell({ children }: { children: React.ReactNode }) {
           {children}
         </div>
       </div>
-      <NotificationCenter />
       <MeetingCallNotification />
       <PushNotificationsPrompt />
     </div>
   );
 }
 
-function NotificationCenter() {
-  const { notifications, unreadCount, markAllRead, markNotificationRead, latestNotification, clearLatestNotification } = useApp();
-  const router = useRouter();
-  const [open, setOpen] = useState(false);
-
-  useEffect(() => {
-    if (!latestNotification) return;
-    const timeout = window.setTimeout(clearLatestNotification, 8000);
-    return () => window.clearTimeout(timeout);
-  }, [latestNotification, clearLatestNotification]);
-
-  const openNotification = async (id: string, link: string | null) => {
-    try {
-      await markNotificationRead(id);
-      if (latestNotification?.id === id) clearLatestNotification();
-      setOpen(false);
-      router.push(link || "/dashboard");
-    } catch (error) {
-      console.error(error);
-    }
-  };
-
-  return (
-    <div className="fixed right-3 top-3 z-50 sm:right-5 sm:top-5">
-      <button
-        type="button"
-        onClick={() => setOpen((value) => !value)}
-        aria-label={unreadCount ? `Notifications, ${unreadCount} unread` : "Notifications"}
-        aria-expanded={open}
-        className="relative flex h-11 w-11 items-center justify-center rounded-full border border-neutral-700 bg-neutral-900 text-white shadow-lg hover:bg-neutral-800"
-      >
-        <IconBell className="h-5 w-5" />
-        {unreadCount > 0 && <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white">{unreadCount > 99 ? "99+" : unreadCount}</span>}
-      </button>
-      {latestNotification && !open && (
-        <button type="button" onClick={() => void openNotification(latestNotification.id, latestNotification.link)} className="absolute right-0 top-14 w-[min(24rem,calc(100vw-1.5rem))] rounded-xl border border-neutral-700 bg-neutral-950 p-4 text-left text-white shadow-2xl">
-          <span className="block text-xs font-semibold uppercase tracking-wide text-cyan-300">New notification</span>
-          <span className="mt-1 block text-sm font-semibold">{latestNotification.title}</span>
-          {latestNotification.body && <span className="mt-1 block text-xs text-neutral-300">{latestNotification.body}</span>}
-        </button>
-      )}
-      {open && (
-        <section aria-label="Notifications" className="absolute right-0 mt-2 w-[min(24rem,calc(100vw-1.5rem))] overflow-hidden rounded-2xl border border-neutral-700 bg-neutral-950 text-white shadow-2xl">
-          <header className="flex items-center justify-between border-b border-neutral-800 px-4 py-3">
-            <div>
-              <h2 className="font-semibold">Notifications</h2>
-              <p className="text-xs text-neutral-400">Messages, calls and account updates</p>
-            </div>
-            <button type="button" onClick={() => void markAllRead()} disabled={!unreadCount} className="flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-cyan-300 hover:bg-neutral-800 disabled:opacity-40">
-              <IconCheck className="h-4 w-4" />Mark all read
-            </button>
-          </header>
-          <div className="max-h-[min(70vh,28rem)] overflow-y-auto">
-            {notifications.length === 0 ? (
-              <p className="px-4 py-8 text-center text-sm text-neutral-400">No notifications yet. New messages and meeting invites will appear here.</p>
-            ) : notifications.slice(0, 50).map((notification) => (
-              <button key={notification.id} type="button" onClick={() => void openNotification(notification.id, notification.link)} className={`block w-full border-b border-neutral-800 px-4 py-3 text-left transition hover:bg-neutral-900 ${notification.read ? "opacity-70" : "bg-cyan-950/25"}`}>
-                <span className="flex items-start gap-2">
-                  <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${notification.read ? "bg-neutral-600" : "bg-cyan-400"}`} />
-                  <span className="min-w-0 flex-1">
-                    <span className="block text-sm font-medium">{notification.title}</span>
-                    {notification.body && <span className="mt-1 block break-words text-xs leading-relaxed text-neutral-300">{notification.body}</span>}
-                    <time className="mt-1 block text-[11px] text-neutral-500">{new Date(notification.created_at).toLocaleString()}</time>
-                  </span>
-                </span>
-              </button>
-            ))}
-          </div>
-        </section>
-      )}
-    </div>
-  );
-}
 function Avatar({ profile }: { profile: { first_name: string; last_name: string; avatar_url: string | null } }) {
   if (profile.avatar_url) {
     return (

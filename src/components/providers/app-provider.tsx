@@ -19,14 +19,11 @@ type AppContextType = {
   isAdmin: boolean;
   members: Profile[];
   notifications: Notification[];
-  latestNotification: Notification | null;
-  clearLatestNotification: () => void;
   unreadCount: number;
   markAllRead: () => Promise<void>;
   markNotificationRead: (id: string) => Promise<void>;
   refreshMembers: () => Promise<void>;
   enablePushNotifications: () => Promise<void>;
-  sendTestPushNotification: () => Promise<void>;
 };
 
 const AppContext = createContext<AppContextType | null>(null);
@@ -43,8 +40,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [members, setMembers] = useState<Profile[]>([]);
   const [notifications, setNotifications] = useState<Notification[]>([]);
-  const [latestNotification, setLatestNotification] = useState<Notification | null>(null);
-  const clearLatestNotification = useCallback(() => setLatestNotification(null), []);
   const profileRef = useRef<Profile | null>(null);
 
   const refreshMembers = useCallback(async () => {
@@ -99,9 +94,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           },
           (payload) => {
             const n = payload.new as Notification;
+            if (n.type === "push_test") return;
             setNotifications((prev) => [n, ...prev.filter((item) => item.id !== n.id)].slice(0, 50));
-            setLatestNotification(n);
-            // Show an in-app text alert while the dashboard is open; background push is separate.
 
           }
         )
@@ -127,6 +121,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         .from("notifications")
         .select("*")
         .eq("user_id", user.id)
+        .neq("type", "push_test")
         .order("created_at", { ascending: false })
         .limit(50);
       if (notificationLoadError) console.error("Could not load notifications", notificationLoadError.message);
@@ -211,28 +206,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  const sendTestPushNotification = useCallback(async () => {
-    const userId = profileRef.current?.id;
-    if (!userId) throw new Error("Your profile is not ready. Refresh the dashboard and try again.");
-    const response = await fetch("/api/push/send", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        userId,
-        title: "Grid & Logic test alert",
-        body: "This is a direct test of push delivery to this account's registered devices.",
-        url: "/dashboard/profile",
-        kind: "push_test",
-      }),
-    });
-    const result = await response.json().catch(() => null);
-    if (!response.ok) throw new Error(result?.error || `Push test failed (${response.status}).`);
-    if (!result?.sent) {
-      if (result?.failed) throw new Error(`Push service rejected delivery to ${result.failed} device(s). Check the VAPID keys and server logs.`);
-      throw new Error("No active push subscription is saved for this account. Enable alerts again on this device.");
-    }
-  }, []);
-
   const markAllRead = useCallback(async () => {
     if (!profileRef.current) return;
     setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
@@ -270,14 +243,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         isAdmin: profile.role === "admin",
         members,
         notifications,
-        latestNotification,
-        clearLatestNotification,
         unreadCount: notifications.filter((n) => !n.read).length,
         markAllRead,
         markNotificationRead,
         refreshMembers,
         enablePushNotifications,
-        sendTestPushNotification,
       }}
     >
       {children}
@@ -286,7 +256,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 }
 
 export function PushNotificationsPrompt() {
-  const { enablePushNotifications, sendTestPushNotification } = useApp();
+  const { enablePushNotifications } = useApp();
   const pathname = usePathname();
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
@@ -329,19 +299,6 @@ export function PushNotificationsPrompt() {
     }
   };
 
-  const test = async () => {
-    setBusy(true);
-    setMessage("");
-    try {
-      await sendTestPushNotification();
-      setMessage("Push sent. Check this device's notification tray.");
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Could not send a test notification.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
   return (
     <div className="fixed bottom-3 left-3 z-40 flex max-w-[calc(100vw-1.5rem)] items-center gap-3 rounded-xl border border-neutral-700 bg-neutral-900 px-3 py-2.5 shadow-xl sm:bottom-5 sm:left-auto sm:right-5">
       <div className="min-w-0 text-xs text-neutral-300">
@@ -349,9 +306,7 @@ export function PushNotificationsPrompt() {
         {message && <p className="mt-1 max-w-64 text-amber-300">{message}</p>}
       </div>
       {hasSubscription ? (
-        <button type="button" onClick={test} disabled={busy} className="shrink-0 rounded-lg bg-cyan-600 px-3 py-2 text-xs font-semibold text-white hover:bg-cyan-500 disabled:opacity-60">
-          {busy ? "Sending…" : "Send test"}
-        </button>
+        <span className="shrink-0 rounded-lg bg-emerald-900/50 px-3 py-2 text-xs font-semibold text-emerald-200">Enabled</span>
       ) : (
         <button type="button" onClick={enable} disabled={busy} className="shrink-0 rounded-lg bg-cyan-600 px-3 py-2 text-xs font-semibold text-white hover:bg-cyan-500 disabled:opacity-60">
           {busy ? "Enabling…" : "Enable"}
