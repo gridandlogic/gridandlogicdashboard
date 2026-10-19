@@ -14,6 +14,14 @@ export async function POST(req: NextRequest) {
     }
 
     const supabase = await createClient();
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+      return NextResponse.json({ error: "Sign in before enabling notifications." }, { status: 401 });
+    }
+    if (user.id !== userId) {
+      return NextResponse.json({ error: "You can only save your own notification settings." }, { status: 403 });
+    }
+
     const { error } = await supabase
       .from("push_subscriptions")
       .upsert(
@@ -46,11 +54,20 @@ export async function DELETE(req: NextRequest) {
     }
 
     const supabase = await createClient();
-    await supabase
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+      return NextResponse.json({ error: "Sign in before changing notification settings." }, { status: 401 });
+    }
+    if (user.id !== userId) {
+      return NextResponse.json({ error: "You can only change your own notification settings." }, { status: 403 });
+    }
+
+    const { error } = await supabase
       .from("push_subscriptions")
       .delete()
-      .eq("user_id", userId)
+      .eq("user_id", user.id)
       .eq("endpoint", endpoint);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
     return NextResponse.json({ success: true });
   } catch {

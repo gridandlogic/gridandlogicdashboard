@@ -107,6 +107,8 @@ create table if not exists public.push_subscriptions (
   keys jsonb not null,
   created_at timestamptz not null default now()
 );
+create unique index if not exists push_subscriptions_user_endpoint_key
+  on public.push_subscriptions (user_id, endpoint);
 
 -- ---------- NOTIFICATIONS ----------
 create table if not exists public.notifications (
@@ -322,6 +324,7 @@ create policy "participants guest select" on public.meeting_participants for sel
 -- push subscriptions: user manages own subscriptions
 create policy "push subs select" on public.push_subscriptions for select to authenticated using (user_id = auth.uid());
 create policy "push subs insert" on public.push_subscriptions for insert to authenticated with check (user_id = auth.uid());
+create policy "push subs update" on public.push_subscriptions for update to authenticated using (user_id = auth.uid()) with check (user_id = auth.uid());
 create policy "push subs delete" on public.push_subscriptions for delete to authenticated using (user_id = auth.uid());
 
 -- notifications: user reads own; any approved user may create (invites, assignments)

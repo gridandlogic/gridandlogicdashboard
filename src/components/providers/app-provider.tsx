@@ -165,7 +165,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         },
       }),
     });
-    if (!response.ok) throw new Error("Could not save your notification settings. Please try again.");
+    if (!response.ok) {
+      const result = await response.json().catch(() => null);
+      throw new Error(result?.error || "Could not save your notification settings. Please try again.");
+    }
   }, []);
 
   const markAllRead = useCallback(async () => {
