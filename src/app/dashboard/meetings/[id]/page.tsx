@@ -769,7 +769,12 @@ export default function MeetingRoomPage() {
         payload: { id: myId },
       });
     } else {
+      if (!navigator.mediaDevices?.getDisplayMedia) {
+        setMediaError("Screen sharing is not available in this browser. You can still use your camera and microphone.");
+        return;
+      }
       try {
+        setMediaError(null);
         const screen = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 } });
         screenStreamRef.current = screen;
 
@@ -811,7 +816,12 @@ export default function MeetingRoomPage() {
           event: "share",
           payload: { id: myId },
         });
-      } catch {}
+      } catch (error) {
+        const name = (error as DOMException)?.name;
+        if (name !== "NotAllowedError" && name !== "AbortError") {
+          setMediaError("Could not start screen sharing. Check browser permissions and try again.");
+        }
+      }
     }
   };
 
@@ -889,29 +899,27 @@ export default function MeetingRoomPage() {
     const lastInvite = invitedUsers[userId];
     if (lastInvite && Date.now() - lastInvite < 10000) return;
 
-    await supabase.from("meeting_participants").upsert(
+    const { error: participantError } = await supabase.from("meeting_participants").upsert(
       { meeting_id: meetingId, user_id: userId, invited: true },
       { onConflict: "meeting_id,user_id" }
     );
+    if (participantError) {
+      setMediaError(`Could not invite this teammate: ${participantError.message}`);
+      return;
+    }
 
-    await supabase.from("notifications").insert({
+    setMediaError(null);
+    const { error: notificationError } = await supabase.from("notifications").insert({
       user_id: userId,
       type: "meeting_invite",
       title: "📹 Meeting Call",
       body: `${profile.first_name} ${profile.last_name} is calling you to join "${meeting?.title}"`,
       link: `/dashboard/meetings/${meetingId}`,
     });
-
-    fetch("/api/push/send", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        userId,
-        title: "📹 Meeting Call",
-        body: `${profile.first_name} ${profile.last_name} is calling you to join "${meeting?.title}"`,
-        url: `/dashboard/meetings/${meetingId}`,
-      }),
-    }).catch(() => {});
+    if (notificationError) {
+      setMediaError(`Could not send the meeting invite: ${notificationError.message}`);
+      return;
+    }
 
     setInvitedUsers((prev) => ({ ...prev, [userId]: Date.now() }));
   };
@@ -989,9 +997,9 @@ export default function MeetingRoomPage() {
       : "grid-cols-3 md:grid-cols-4";
 
   return (
-    <div className="flex flex-1 flex-col overflow-hidden bg-neutral-950 text-white">
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-neutral-950 text-white">
       {/* Top bar — Google Meet style */}
-      <div className="flex items-center justify-between border-b border-neutral-800 px-4 py-3">
+      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-neutral-800 px-3 pb-2.5 pt-[max(env(safe-area-inset-top),0.625rem)] sm:px-4 sm:py-3">
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2">
             <span className={`h-2.5 w-2.5 rounded-full ${joined ? "bg-green-500 animate-pulse" : "bg-amber-500"}`} />
@@ -1029,9 +1037,9 @@ export default function MeetingRoomPage() {
       )}
 
       {/* Main Body with Video Stage + Slide-out In-Meeting Chat */}
-      <div className="flex flex-1 overflow-hidden">
+      <div className="relative flex min-h-0 flex-1 overflow-hidden">
         {/* Main Video stage */}
-        <div className="flex flex-1 flex-col overflow-hidden p-2 sm:p-3">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden p-1.5 sm:p-3">
           {hasShares && activeShare ? (
             <div className="flex flex-1 flex-col overflow-hidden">
               {allShares.length > 1 && (
@@ -1256,7 +1264,7 @@ export default function MeetingRoomPage() {
 
         {/* Slide-out In-Meeting Chat Drawer */}
         {showChat && (
-          <div className="flex w-80 flex-col border-l border-neutral-800 bg-neutral-900/95 backdrop-blur-md">
+          <div className="absolute inset-x-2 bottom-2 top-2 z-20 flex w-auto flex-col rounded-2xl border border-neutral-700 bg-neutral-900/95 shadow-2xl backdrop-blur-md sm:static sm:w-80 sm:shrink-0 sm:rounded-none sm:border-0 sm:border-l sm:shadow-none">
             <div className="flex items-center justify-between border-b border-neutral-800 px-4 py-3">
               <div className="flex items-center gap-2">
                 <IconMessageDots className="h-5 w-5 text-cyan-400" />
@@ -1330,7 +1338,7 @@ export default function MeetingRoomPage() {
       </div>
 
       {/* Bottom control bar — Google Meet style */}
-      <div className="flex items-center justify-center gap-2 border-t border-neutral-800 bg-neutral-950 px-3 py-4 sm:gap-3 sm:px-4">
+      <div className="flex shrink-0 flex-wrap items-center justify-center gap-1.5 border-t border-neutral-800 bg-neutral-950 px-2 py-2.5 pb-[max(env(safe-area-inset-bottom),0.625rem)] sm:gap-3 sm:px-4 sm:py-4">
         <MeetControlButton
           on={micOn}
           onClick={toggleMic}

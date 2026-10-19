@@ -17,6 +17,7 @@ export function useCallNotification() {
   const router = useRouter();
   const [activeCall, setActiveCall] = useState<IncomingCall | null>(null);
   const [isVisible, setIsVisible] = useState(false);
+  const isVisibleRef = useRef(false);
   const audioContextRef = useRef<AudioContext | null>(null);
   const oscillatorRef = useRef<OscillatorNode | null>(null);
   const gainNodeRef = useRef<GainNode | null>(null);
@@ -28,6 +29,7 @@ export function useCallNotification() {
 
       const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
       audioContextRef.current = audioContext;
+      if (audioContext.state === "suspended") void audioContext.resume();
 
       const oscillator = audioContext.createOscillator();
       const gainNode = audioContext.createGain();
@@ -66,21 +68,20 @@ export function useCallNotification() {
   }, []);
 
   const stopRingtone = useCallback(() => {
-    try {
-      if (oscillatorRef.current) {
-        oscillatorRef.current.stop();
-        oscillatorRef.current.disconnect();
-        oscillatorRef.current = null;
-      }
-      if (gainNodeRef.current) {
-        gainNodeRef.current.disconnect();
-        gainNodeRef.current = null;
-      }
-      if (audioContextRef.current) {
-        audioContextRef.current.close();
-        audioContextRef.current = null;
-      }
-    } catch {}
+    const oscillator = oscillatorRef.current;
+    oscillatorRef.current = null;
+    try { oscillator?.stop(); } catch {}
+    try { oscillator?.disconnect(); } catch {}
+
+    const gainNode = gainNodeRef.current;
+    gainNodeRef.current = null;
+    try { gainNode?.disconnect(); } catch {}
+
+    const audioContext = audioContextRef.current;
+    audioContextRef.current = null;
+    if (audioContext && audioContext.state !== "closed") {
+      void audioContext.close().catch(() => {});
+    }
   }, []);
 
   const vibrate = useCallback(() => {
@@ -93,6 +94,13 @@ export function useCallNotification() {
   const handleMeetingInvite = useCallback(
     (notification: Notification) => {
       if (notification.type !== "meeting_invite") return;
+
+      const previousCall = (window as any).__callCleanup;
+      if (previousCall) {
+        clearInterval(previousCall.ringInterval);
+        clearTimeout(previousCall.dismissTimeout);
+        delete (window as any).__callCleanup;
+      }
 
       const call: IncomingCall = {
         id: notification.id,
@@ -107,6 +115,7 @@ export function useCallNotification() {
       };
 
       setActiveCall(call);
+      isVisibleRef.current = true;
       setIsVisible(true);
 
       // Play ringtone immediately
@@ -117,7 +126,7 @@ export function useCallNotification() {
 
       // Continue ringtone/vibration until answered or dismissed
       const ringInterval = setInterval(() => {
-        if (!isVisible) {
+        if (!isVisibleRef.current) {
           clearInterval(ringInterval);
           return;
         }
@@ -128,6 +137,7 @@ export function useCallNotification() {
       // Auto-dismiss after 45 seconds (longer for mobile)
       const dismissTimeout = setTimeout(() => {
         clearInterval(ringInterval);
+        isVisibleRef.current = false;
         setIsVisible(false);
         stopRingtone();
         setTimeout(() => setActiveCall(null), 300);
@@ -139,7 +149,7 @@ export function useCallNotification() {
         dismissTimeout,
       };
     },
-    [playRingtone, stopRingtone, vibrate, isVisible]
+    [playRingtone, stopRingtone, vibrate]
   );
 
   useEffect(() => {
@@ -186,6 +196,7 @@ export function useCallNotification() {
       stopRingtone();
       router.push(`/dashboard/meetings/${activeCall.meetingId}`);
     }
+    isVisibleRef.current = false;
     setIsVisible(false);
     setTimeout(() => setActiveCall(null), 300);
   }, [activeCall, router, stopRingtone]);
@@ -197,6 +208,7 @@ export function useCallNotification() {
       delete (window as any).__callCleanup;
     }
     stopRingtone();
+    isVisibleRef.current = false;
     setIsVisible(false);
     setTimeout(() => setActiveCall(null), 300);
   }, [stopRingtone]);

@@ -627,7 +627,12 @@ export default function GuestJoinPage() {
         payload: { id: guestId },
       });
     } else {
+      if (!navigator.mediaDevices?.getDisplayMedia) {
+        setMediaError("Screen sharing is not available in this browser. You can still use your camera and microphone.");
+        return;
+      }
       try {
+        setMediaError(null);
         const screen = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 } });
         screenStreamRef.current = screen;
         const camStream = localStreamRef.current ?? new MediaStream();
@@ -665,7 +670,12 @@ export default function GuestJoinPage() {
           event: "share",
           payload: { id: guestId },
         });
-      } catch {}
+      } catch (error) {
+        const name = (error as DOMException)?.name;
+        if (name !== "NotAllowedError" && name !== "AbortError") {
+          setMediaError("Could not start screen sharing. Check browser permissions and try again.");
+        }
+      }
     }
   };
 

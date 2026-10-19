@@ -8,7 +8,7 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Notification, Profile } from "@/lib/types";
@@ -22,6 +22,7 @@ type AppContextType = {
   unreadCount: number;
   markAllRead: () => Promise<void>;
   refreshMembers: () => Promise<void>;
+  enablePushNotifications: () => Promise<void>;
 };
 
 const AppContext = createContext<AppContextType | null>(null);
@@ -81,43 +82,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         .limit(50);
       if (notifs) setNotifications(notifs as Notification[]);
 
-      if (typeof window !== "undefined" && "Notification" in window) {
-        if (window.Notification.permission === "default") {
-          window.Notification.requestPermission();
-        }
-      }
-
-      // Register service worker and subscribe to web push
-      if (typeof window !== "undefined" && "serviceWorker" in navigator) {
-        try {
-          const reg = await navigator.serviceWorker.register("/sw.js");
-          const vapidKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
-          if (vapidKey && window.Notification.permission === "granted") {
-            const existing = await reg.pushManager.getSubscription();
-            if (!existing) {
-              const sub = await reg.pushManager.subscribe({
-                userVisibleOnly: true,
-                applicationServerKey: vapidKey,
-              });
-              await fetch("/api/push/subscribe", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  subscription: {
-                    endpoint: sub.endpoint,
-                    keys: sub.getKey("p256dh") && sub.getKey("auth")
-                      ? {
-                          p256dh: btoa(String.fromCharCode(...new Uint8Array(sub.getKey("p256dh")!))),
-                          auth: btoa(String.fromCharCode(...new Uint8Array(sub.getKey("auth")!))),
-                        }
-                      : {},
-                  },
-                  userId: user.id,
-                }),
-              });
-            }
-          }
-        } catch {}
+      // Install the worker early, but ask for notification permission only
+      // after the user chooses to enable call and message alerts.
+      if ("serviceWorker" in navigator) {
+        navigator.serviceWorker.register("/sw.js").catch(() => {});
       }
 
       notifChannel = supabase
@@ -133,33 +101,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           (payload) => {
             const n = payload.new as Notification;
             setNotifications((prev) => [n, ...prev]);
-            // Send web push notification (works on mobile when app is backgrounded)
-            fetch("/api/push/send", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                userId: user.id,
-                title: n.title,
-                body: n.body ?? "",
-                url: n.link ?? "/dashboard",
-              }),
-            }).catch(() => {});
-            // Also show in-browser notification if page is focused
-            if (
-              typeof window !== "undefined" &&
-              "Notification" in window &&
-              window.Notification.permission === "granted" &&
-              document.visibilityState !== "visible"
-            ) {
-              const browserNotif = new window.Notification(n.title, {
-                body: n.body ?? undefined,
-                icon: "/logo.svg",
-              });
-              browserNotif.onclick = () => {
-                window.focus();
-                if (n.link) router.push(n.link);
-              };
-            }
+            // The database push trigger sends OS notifications even when this
+            // tab is closed. Sending from here would duplicate each alert.
           }
         )
         .on(
@@ -185,6 +128,44 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (notifChannel) supabase.removeChannel(notifChannel);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const enablePushNotifications = useCallback(async () => {
+    if (!("Notification" in window) || !("serviceWorker" in navigator) || !("PushManager" in window)) {
+      throw new Error("Push notifications are not supported in this browser.");
+    }
+    const vapidKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
+    if (!vapidKey) throw new Error("Push notifications are not configured for this app yet.");
+
+    const permission = await window.Notification.requestPermission();
+    if (permission !== "granted") throw new Error("Allow notifications in your browser settings to receive calls and messages.");
+
+    const registration = await navigator.serviceWorker.ready;
+    let decodedVapidKey = vapidKey.replace(/-/g, "+").replace(/_/g, "/");
+    decodedVapidKey += "=".repeat((4 - decodedVapidKey.length % 4) % 4);
+    const applicationServerKey = Uint8Array.from(
+      atob(decodedVapidKey),
+      (character) => character.charCodeAt(0)
+    );
+    const subscription = await registration.pushManager.getSubscription() ??
+      await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey });
+    const p256dh = subscription.getKey("p256dh");
+    const auth = subscription.getKey("auth");
+    if (!p256dh || !auth) throw new Error("Your browser returned an invalid push subscription.");
+
+    const toBase64 = (value: ArrayBuffer) => btoa(String.fromCharCode(...new Uint8Array(value)));
+    const response = await fetch("/api/push/subscribe", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        userId: profileRef.current?.id,
+        subscription: {
+          endpoint: subscription.endpoint,
+          keys: { p256dh: toBase64(p256dh), auth: toBase64(auth) },
+        },
+      }),
+    });
+    if (!response.ok) throw new Error("Could not save your notification settings. Please try again.");
   }, []);
 
   const markAllRead = useCallback(async () => {
@@ -216,9 +197,65 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         unreadCount: notifications.filter((n) => !n.read).length,
         markAllRead,
         refreshMembers,
+        enablePushNotifications,
       }}
     >
       {children}
     </AppContext.Provider>
+  );
+}
+
+export function PushNotificationsPrompt() {
+  const { enablePushNotifications } = useApp();
+  const pathname = usePathname();
+  const [message, setMessage] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [dismissed, setDismissed] = useState(false);
+  const [hasSubscription, setHasSubscription] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !("Notification" in window)) return;
+    if (window.Notification.permission !== "granted") {
+      setHasSubscription(false);
+      return;
+    }
+    navigator.serviceWorker.ready
+      .then(async (registration) => {
+        const subscription = await registration.pushManager.getSubscription();
+        if (subscription) await enablePushNotifications();
+        setHasSubscription(Boolean(subscription));
+      })
+      .catch(() => setHasSubscription(false));
+  }, [enablePushNotifications]);
+
+  const inMeetingRoom = pathname.startsWith("/dashboard/meetings/") && pathname !== "/dashboard/meetings/";
+  if (typeof window === "undefined" || !("Notification" in window) || window.Notification.permission === "denied" || hasSubscription === true || dismissed || inMeetingRoom) {
+    return null;
+  }
+
+  const enable = async () => {
+    setBusy(true);
+    setMessage("");
+    try {
+      await enablePushNotifications();
+      setHasSubscription(true);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not enable notifications.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="fixed bottom-3 left-3 z-40 flex max-w-[calc(100vw-1.5rem)] items-center gap-3 rounded-xl border border-neutral-700 bg-neutral-900 px-3 py-2.5 shadow-xl sm:bottom-5 sm:left-auto sm:right-5">
+      <div className="min-w-0 text-xs text-neutral-300">
+        <p className="font-medium text-white">Get call and message alerts</p>
+        {message && <p className="mt-1 max-w-64 text-amber-300">{message}</p>}
+      </div>
+      <button type="button" onClick={enable} disabled={busy} className="shrink-0 rounded-lg bg-cyan-600 px-3 py-2 text-xs font-semibold text-white hover:bg-cyan-500 disabled:opacity-60">
+        {busy ? "Enabling…" : "Enable"}
+      </button>
+      <button type="button" onClick={() => setDismissed(true)} aria-label="Dismiss notification prompt" className="shrink-0 rounded-md px-2 py-2 text-neutral-400 hover:bg-neutral-800 hover:text-white">×</button>
+    </div>
   );
 }

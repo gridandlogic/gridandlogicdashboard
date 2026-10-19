@@ -13,7 +13,7 @@ import {
 } from "@tabler/icons-react";
 import { motion } from "motion/react";
 import { cn } from "@/lib/utils";
-import { AppProvider, useApp } from "@/components/providers/app-provider";
+import { AppProvider, PushNotificationsPrompt, useApp } from "@/components/providers/app-provider";
 import { MeetingCallNotification } from "@/components/meeting/meeting-call-notification";
 
 export default function DashboardLayout({
@@ -80,7 +80,7 @@ function Shell({ children }: { children: React.ReactNode }) {
     <div
       className={cn(
         "mx-auto flex w-full flex-1 flex-col overflow-hidden bg-gray-100 md:flex-row dark:bg-neutral-800",
-        "h-screen"
+        "h-dvh min-h-0"
       )}
     >
       <Sidebar open={open} setOpen={setOpen}>
@@ -129,6 +129,7 @@ function Shell({ children }: { children: React.ReactNode }) {
         </div>
       </div>
       <MeetingCallNotification />
+      <PushNotificationsPrompt />
     </div>
   );
 }
