@@ -19,8 +19,11 @@ type AppContextType = {
   isAdmin: boolean;
   members: Profile[];
   notifications: Notification[];
+  latestNotification: Notification | null;
+  clearLatestNotification: () => void;
   unreadCount: number;
   markAllRead: () => Promise<void>;
+  markNotificationRead: (id: string) => Promise<void>;
   refreshMembers: () => Promise<void>;
   enablePushNotifications: () => Promise<void>;
   sendTestPushNotification: () => Promise<void>;
@@ -40,6 +43,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [members, setMembers] = useState<Profile[]>([]);
   const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [latestNotification, setLatestNotification] = useState<Notification | null>(null);
+  const clearLatestNotification = useCallback(() => setLatestNotification(null), []);
   const profileRef = useRef<Profile | null>(null);
 
   const refreshMembers = useCallback(async () => {
@@ -75,13 +80,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
       await refreshMembers();
 
-      const { data: notifs } = await supabase
-        .from("notifications")
-        .select("*")
-        .eq("user_id", user.id)
-        .order("created_at", { ascending: false })
-        .limit(50);
-      if (notifs) setNotifications(notifs as Notification[]);
 
       // Install the worker early, but ask for notification permission only
       // after the user chooses to enable call and message alerts.
@@ -101,9 +99,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           },
           (payload) => {
             const n = payload.new as Notification;
-            setNotifications((prev) => [n, ...prev]);
-            // The database push trigger sends OS notifications even when this
-            // tab is closed. Sending from here would duplicate each alert.
+            setNotifications((prev) => [n, ...prev.filter((item) => item.id !== n.id)].slice(0, 50));
+            setLatestNotification(n);
+            // Show an in-app text alert while the dashboard is open; background push is separate.
+
           }
         )
         .on(
@@ -121,6 +120,25 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           }
         )
         .subscribe();
+
+      // Subscribe before loading history, then merge both results so an alert
+      // created during startup is not lost between the query and subscription.
+      const { data: notifs, error: notificationLoadError } = await supabase
+        .from("notifications")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false })
+        .limit(50);
+      if (notificationLoadError) console.error("Could not load notifications", notificationLoadError.message);
+      if (notifs) {
+        setNotifications((current) => {
+          const merged = new Map<string, Notification>();
+          for (const item of [...(notifs as Notification[]), ...current]) merged.set(item.id, item);
+          return [...merged.values()]
+            .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+            .slice(0, 50);
+        });
+      }
     };
 
     init();
@@ -224,6 +242,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       .eq("user_id", profileRef.current.id)
       .eq("read", false);
   }, [supabase]);
+  const markNotificationRead = useCallback(async (id: string) => {
+    const userId = profileRef.current?.id;
+    if (!userId) return;
+    setNotifications((prev) => prev.map((n) => n.id === id ? { ...n, read: true } : n));
+    const { error } = await supabase
+      .from("notifications")
+      .update({ read: true })
+      .eq("id", id)
+      .eq("user_id", userId);
+    if (error) throw new Error(`Could not update notification: ${error.message}`);
+  }, [supabase]);
 
   if (!profile) {
     return (
@@ -241,8 +270,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         isAdmin: profile.role === "admin",
         members,
         notifications,
+        latestNotification,
+        clearLatestNotification,
         unreadCount: notifications.filter((n) => !n.read).length,
         markAllRead,
+        markNotificationRead,
         refreshMembers,
         enablePushNotifications,
         sendTestPushNotification,
