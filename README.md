@@ -35,6 +35,8 @@ Incoming calls ring in the open dashboard and arrive as a high-priority, vibrati
 ### 3. First user = Admin
 The **first account that signs up automatically becomes the approved admin**. Everyone signing up after that is `pending` — admins get a push notification and approve/reject them in the **Admin** panel.
 
+If a new account appears in Supabase **Authentication > Users** but not in **Admin > Pending approvals**, run [`supabase/repair-signup-profiles.sql`](supabase/repair-signup-profiles.sql) in the Supabase SQL Editor. It reinstalls the signup trigger and adds missing Auth users as pending profiles so they can be approved.
+
 After signing up your admin, run this once in the SQL Editor to create the default channels:
 
 ```sql
